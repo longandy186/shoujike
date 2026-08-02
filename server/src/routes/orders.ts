@@ -6,6 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db, OrderStatus, OrderSource } from '../db';
+import { consumeBom } from '../services/inventory.service';
 
 const router = Router();
 
@@ -138,7 +139,29 @@ router.patch('/orders/:orderId/status', (req: Request, res: Response) => {
       return res.status(404).json({ error: 'NOT_FOUND', message: '订单不存在' });
     }
 
-    const order = db.prepare('SELECT * FROM orders WHERE order_id = ?').get(req.params.orderId);
+    const order = db.prepare('SELECT * FROM orders WHERE order_id = ?').get(req.params.orderId) as {
+      order_id: string;
+      master_sku: string;
+      status: string;
+    } | undefined;
+
+    // Phase 1.5：订单转为 COMPLETED 时触发 BOM 物料扣减（幂等）
+    if (order && status === OrderStatus.COMPLETED) {
+      try {
+        const bom = consumeBom(order.order_id, order.master_sku);
+        if (bom.alerts.length > 0) {
+          console.warn('[BOM] 库存预警:', bom.alerts.join(' | '));
+        }
+        if (bom.ok && bom.consumed) {
+          console.log(`[BOM] 订单 ${order.order_id} 完成，已扣减 ${order.master_sku} 的物料`);
+        }
+        if (!bom.ok) {
+          console.error('[BOM] 扣减失败:', bom.error);
+        }
+      } catch (bomErr) {
+        console.error('[BOM] 扣减异常:', bomErr);
+      }
+    }
 
     res.json({ ok: true, data: order });
   } catch (err) {

@@ -9,6 +9,26 @@
  */
 
 import db from './connection';
+import fs from 'fs';
+import path from 'path';
+
+/** 初始库存 / 安全库存（与 data/init.sql 种子保持一致） */
+const MATERIAL_INITIAL_STOCK = 100;
+const MATERIAL_SAFETY_STOCK = 20;
+
+/**
+ * 读取 sku.template.json 的物料主数据，用于初始化物料库存表
+ */
+function loadSkuMaterials(): Array<{ materialId: string; name: string; category: string; unit: string; safetyStock: number }> {
+  try {
+    const cfgPath = path.resolve(__dirname, '..', 'config', 'sku.template.json');
+    const raw = fs.readFileSync(cfgPath, 'utf-8');
+    const cfg = JSON.parse(raw) as { materials?: Array<{ materialId: string; name: string; category: string; unit: string; safetyStock: number }> };
+    return cfg.materials ?? [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * 订单状态枚举
@@ -115,13 +135,83 @@ export function initDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_orders_pickup_code ON orders(pickup_code);
   `);
 
+  // ============================================================
+  // materials 表 — 物料库存主表（Phase 1.5）
+  // ============================================================
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS materials (
+      material_id   TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      category      TEXT DEFAULT '',
+      unit          TEXT DEFAULT 'pcs',
+      current_stock INTEGER NOT NULL DEFAULT 0,
+      safety_stock  INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_materials_category ON materials(category);
+  `);
+
+  // ============================================================
+  // bom_consumption_log 表 — BOM 扣减流水（Phase 1.5）
+  // ============================================================
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS bom_consumption_log (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id    TEXT NOT NULL,
+      master_sku  TEXT NOT NULL,
+      material_id TEXT NOT NULL,
+      qty         INTEGER NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bom_log_order     ON bom_consumption_log(order_id);
+    CREATE INDEX IF NOT EXISTS idx_bom_log_material  ON bom_consumption_log(material_id);
+  `);
+
+  // ============================================================
+  // inventory_alerts 表 — 低库存预警记录（Phase 1.5）
+  // ============================================================
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS inventory_alerts (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      material_id   TEXT NOT NULL,
+      material_name TEXT DEFAULT '',
+      remaining     INTEGER NOT NULL,
+      safety_stock  INTEGER NOT NULL,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_inventory_alerts_material ON inventory_alerts(material_id);
+  `);
+
+  // ============================================================
+  // 物料种子数据（幂等：仅 INSERT 不存在的物料，保留已有库存）
+  // 初始库存 100、安全库存 20，与 data/init.sql 保持一致
+  // ============================================================
+  const seedMaterials = loadSkuMaterials();
+  if (seedMaterials.length > 0) {
+    const stmt = db.prepare(`
+      INSERT OR IGNORE INTO materials (material_id, name, category, unit, current_stock, safety_stock)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const seed = db.transaction(() => {
+      for (const m of seedMaterials) {
+        stmt.run(m.materialId, m.name, m.category, m.unit, MATERIAL_INITIAL_STOCK, m.safetyStock || MATERIAL_SAFETY_STOCK);
+      }
+    });
+    seed();
+    console.log(`[DB] 物料种子已写入: ${seedMaterials.length} 种（初始库存 ${MATERIAL_INITIAL_STOCK}）`);
+  }
+
   // 兼容旧数据库：无 pickup_code 列时自动添加
   try {
     db.exec(`ALTER TABLE orders ADD COLUMN pickup_code TEXT DEFAULT ''`);
   } catch { /* 列已存在则忽略 */ }
 
   console.log('[DB] 数据库初始化完成');
-  console.log('[DB] 已创建表: orders');
+  console.log('[DB] 已创建表: orders, materials, bom_consumption_log, inventory_alerts');
   console.log('[DB] 订单状态枚举:', Object.values(OrderStatus).join(' → '));
 }
 

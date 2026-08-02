@@ -5,6 +5,7 @@ import { initDatabase } from './db';
 import uploadRoutes from './routes/upload';
 import orderRoutes from './routes/orders';
 import printRoutes from './routes/print';
+import skuRoutes from './routes/sku';
 
 // ============================================================
 // 环境变量加载（tsx 不原生支持 .env，使用手动读取）
@@ -79,6 +80,7 @@ app.get('/api/ping', (_req, res) => {
 app.use('/api', uploadRoutes);
 app.use('/api', orderRoutes);
 app.use('/api', printRoutes);
+app.use('/api', skuRoutes);
 
 // -------------------- 404 处理 --------------------
 app.use((_req, res) => {

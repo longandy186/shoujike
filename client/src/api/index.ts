@@ -48,6 +48,9 @@ async function request<T>(
 // API 方法
 // ============================================================
 
+/** 基础请求封装（供其他模块复用，如 SKU 拉取） */
+export { request };
+
 /** 健康检查 — 验证后端连通性 */
 export async function healthCheck() {
   return request<{ status: string; timestamp: string }>('/health');

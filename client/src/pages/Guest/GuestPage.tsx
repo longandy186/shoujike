@@ -4,9 +4,9 @@
  * 移动端优先适配
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { uploadImage, createOrder } from '../../api';
-import { getEnabledProducts, type Product } from './products';
+import { fetchProducts, getEnabledProducts, type Product } from './products';
 import './Guest.css';
 
 export default function GuestPage() {
@@ -21,7 +21,13 @@ export default function GuestPage() {
   const [pickupCode, setPickupCode] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const products = getEnabledProducts();
+  // Phase 1.5：从后端 SKU 接口拉取产品（带静态兜底）
+  const [products, setProducts] = useState<Product[]>(getEnabledProducts());
+  useEffect(() => {
+    fetchProducts().then(setProducts).catch(() => {
+      /* 保持兜底 */
+    });
+  }, []);
 
   // 选择产品 → 进入上传步骤
   const handleSelectProduct = (product: Product) => {
