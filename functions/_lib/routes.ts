@@ -1,7 +1,7 @@
 /**
  * Hono 路由注册 —— 将原有 Express 路由移植到 Pages Functions。
  * 所有 /api/* 请求由 functions/api/[[route]].ts 转发至此。
- * DB 用 D1（异步），图片内联存 D1（Base64，免去 R2 订阅）。
+ * DB 用 D1（异步），图片存 R2 对象存储。
  */
 import { Hono } from 'hono';
 import type { Env } from './types';
@@ -29,10 +29,10 @@ export function registerRoutes(app: Hono<{ Bindings: Env }>) {
       if (!ALLOWED_IMAGE.includes(file.type)) return c.json({ ok: false, error: 'INVALID_TYPE', message: '仅支持 JPG/PNG/WebP/GIF' }, 400);
       if (file.size > MAX_UPLOAD) return c.json({ ok: false, error: 'FILE_TOO_LARGE', message: '文件大小不能超过 20MB' }, 400);
 
-      const id = await putImage(c.env.DB, await file.arrayBuffer(), file.type || 'image/jpeg');
+      const key = await putImage(c.env.BUCKET, await file.arrayBuffer(), file.type || 'image/jpeg');
       return c.json({
         ok: true,
-        data: { filename: String(id), originalName: file.name, size: file.size, url: `/api/files/${id}` },
+        data: { filename: key, originalName: file.name, size: file.size, url: `/api/files/${key}` },
       });
     } catch (e) {
       return c.json({ ok: false, error: 'UPLOAD_ERROR', message: msg(e) }, 400);
@@ -111,8 +111,8 @@ export function registerRoutes(app: Hono<{ Bindings: Env }>) {
       const form = await c.req.parseBody();
       const file = form['image'];
       if (!(file instanceof File)) return c.json({ ok: false, error: 'NO_FILE', message: '请提供打印图' }, 400);
-      const id = await putImage(c.env.DB, await file.arrayBuffer(), 'image/jpeg');
-      const r = await db.savePrintUrl(c.env.DB, c.req.param('orderId'), `/api/files/${id}`);
+      const key = await putImage(c.env.BUCKET, await file.arrayBuffer(), 'image/jpeg');
+      const r = await db.savePrintUrl(c.env.DB, c.req.param('orderId'), `/api/files/${key}`);
       if (r.error === 'NOT_FOUND') return c.json({ ok: false, error: 'NOT_FOUND', message: '订单不存在' }, 404);
       return c.json({ ok: true, data: r.order }, 201);
     } catch (e) {
@@ -169,7 +169,7 @@ export function registerRoutes(app: Hono<{ Bindings: Env }>) {
   // ---------- R2 文件服务（同源，避免 CORS） ----------
   app.get('/api/files/*', async (c) => {
     const key = c.req.path.replace('/api/files/', '');
-    const obj = await getObject(c.env.DB, key);
+    const obj = await getObject(c.env.BUCKET, key);
     if (!obj) return new Response('Not found', { status: 404 });
     return new Response(obj.body, {
       headers: {

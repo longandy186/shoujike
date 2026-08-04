@@ -269,11 +269,13 @@ R2 (BUCKET 绑定)      →  图片存储（替代本地 uploads/ 目录）
 **步骤**
 1. 创建 D1 与 R2（一次性）
    - `wrangler d1 create ai-cc-prod-db` → 把返回 id 填入 `wrangler.toml` 的 `database_id`
-   - `wrangler r2 bucket create ai-cc-prod-uploads`
+   - `wrangler r2 bucket create ai-cc-prod-images-5f5df686`
 2. 构建前端：`npm run build:client`（输出 `client/dist`；注意沙箱 safe-delete 钩子会拦截 vite 清空 dist，构建前先移走旧 `dist`）
 3. 本地联调（无需 token）：`npm run cf:dev`（= `wrangler pages dev client/dist --d1 DB --r2 BUCKET`），访问 http://localhost:8788
 4. 应用 D1 迁移：`wrangler d1 migrations apply ai-cc-prod-db --remote`
-5. 部署：`npm run cf:deploy`（= `wrangler pages deploy client/dist`）
+5. 部署到生产域名：`npm run cf:deploy`（= `wrangler pages deploy client/dist --branch main`）。
+   注意：**必须带 `--branch main`**，否则只更新 Preview（master）环境，根域名（生产）不会变。
+   工作区有未提交改动时加 `--commit-dirty=true`。
 6. 访问分配的 `*.pages.dev` 域名，手机直接打开即可验证（跳过局域网）
 
 **迁移要点**

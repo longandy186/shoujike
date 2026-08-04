@@ -13,8 +13,7 @@ database_name = "ai-cc-prod-db"
 database_id = "e37caa71-6bcd-41ff-b57b-0a2328da2f1b"
 migrations_dir = "migrations"
 
-# 说明：图片改为内联存于 D1（images 表），不再依赖 R2，免去订阅。
-# 如需切回 R2，取消下面的绑定并在 functions/_lib/r2.ts 切回 R2 实现：
-# [[r2_buckets]]
-# binding = "BUCKET"
-# bucket_name = "ai-cc-prod-uploads"
+# R2 对象存储（游客照片 / 打印图）
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "ai-cc-prod-images-5f5df686"

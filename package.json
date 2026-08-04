@@ -14,7 +14,7 @@
     "start:prod": "cd server && npm run start:prod",
     "install:all": "cd client && npm install && cd ../server && npm install",
     "cf:dev": "wrangler pages dev client/dist --d1 DB --r2 BUCKET",
-    "cf:deploy": "wrangler pages deploy client/dist"
+    "cf:deploy": "wrangler pages deploy client/dist --branch main"
   },
   "dependencies": {
     "hono": "^4.6.0"

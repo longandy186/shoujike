@@ -61,9 +61,9 @@ export async function ping() {
   return request<{ message: string; timestamp: number }>('/ping');
 }
 
-/** 上传图片（前端压缩到适合 D1 内联存储的大小） */
+/** 上传图片（前端压缩以控制体积、加快上传；R2 不限单列大小，可保留较高质量） */
 export async function uploadImage(file: File) {
-  const blob = await compressToJpeg(file, 1280, 600 * 1024);
+  const blob = await compressToJpeg(file, 2000, 2 * 1024 * 1024);
   const formData = new FormData();
   formData.append('image', blob, 'photo.jpg');
 
@@ -139,11 +139,11 @@ export async function stockIn(materialId: string, qty: number, note?: string) {
   });
 }
 
-/** 上传高清打印图（dataURL → 压缩 JPEG → 上传） */
+/** 上传高清打印图（dataURL → 压缩 JPEG → 上传 R2，保留较高分辨率以保打印质量） */
 export async function uploadPrint(orderId: string, dataUrl: string) {
   const res = await fetch(dataUrl);
   const blob = await res.blob();
-  const compressed = await compressToJpeg(blob, 1600, 800 * 1024);
+  const compressed = await compressToJpeg(blob, 2400, 3 * 1024 * 1024);
   const formData = new FormData();
   formData.append('image', compressed, 'print.jpg');
 
@@ -164,8 +164,9 @@ export async function uploadPrint(orderId: string, dataUrl: string) {
 }
 
 /**
- * 将图片（File/Blob）缩放重压为 JPEG：目标最长边 maxDim、体积 < maxBytes，
- * 避免 Base64 后超出 D1 单列存储上限。
+ * 将图片（File/Blob）缩放重压为 JPEG：目标最长边 maxDim、体积 < maxBytes。
+ * R2 对单列大小没有限制，这里压缩仅用于控制上传体积与存储成本、加快传输，
+ * 因此可保留比 D1 内联方案更高的分辨率与质量。
  */
 async function compressToJpeg(input: Blob, maxDim: number, maxBytes: number): Promise<Blob> {
   const bitmap = await createImageBitmap(input);
@@ -183,7 +184,7 @@ async function compressToJpeg(input: Blob, maxDim: number, maxBytes: number): Pr
   ctx.drawImage(bitmap, 0, 0, w, h);
   bitmap.close?.();
 
-  let q = 0.85;
+  let q = 0.9;
   let blob = await canvasToJpeg(canvas, q);
   while (blob.size > maxBytes && q > 0.4) {
     q = Math.round((q - 0.1) * 100) / 100;
@@ -197,7 +198,7 @@ async function compressToJpeg(input: Blob, maxDim: number, maxBytes: number): Pr
     const c2ctx = c2.getContext('2d');
     if (c2ctx) {
       c2ctx.drawImage(canvas, 0, 0, c2.width, c2.height);
-      q = 0.8;
+      q = 0.85;
       blob = await canvasToJpeg(c2, q);
       let guard = 0;
       while (blob.size > maxBytes && q > 0.4 && guard < 6) {
