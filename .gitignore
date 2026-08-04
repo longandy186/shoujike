@@ -28,6 +28,12 @@ server/data/
 server/npmcache/
 server/build/
 write_test.db
+server/_phase15_test.db
+
+# Build-validation temp copies (not for commit)
+client/dist-validate-bak/
+client/dist-validate-old/
+client/dist_prev_*/
 
 # Uploads (keep directory, ignore contents)
 uploads/*
@@ -47,6 +53,10 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Cloudflare
+.wrangler/
+.dev.vars
 
 # TypeScript
 *.tsbuildinfo

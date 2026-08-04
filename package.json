@@ -12,9 +12,16 @@
     "build:client": "cd client && npm run build",
     "start": "cd server && npm run start",
     "start:prod": "cd server && npm run start:prod",
-    "install:all": "cd client && npm install && cd ../server && npm install"
+    "install:all": "cd client && npm install && cd ../server && npm install",
+    "cf:dev": "wrangler pages dev client/dist --d1 DB --r2 BUCKET",
+    "cf:deploy": "wrangler pages deploy client/dist"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "concurrently": "^9.1.0",
+    "wrangler": "^3.99.0"
   }
 }

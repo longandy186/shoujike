@@ -249,16 +249,38 @@ npm run start:prod       # = cd server && NODE_ENV=production node dist/index.js
 
 > 说明：生产构建会清空并重建 `client/dist`。部分受限环境（如沙箱）的回收站/删除钩子会拦截 `dist` 清理，此时可在正常开发机上执行 `npm run build`，或构建到临时目录后拷贝产物。
 
-### 阶段 3：Cloudflare 部署（架构说明，需凭证）
+### 阶段 3：Cloudflare 部署（双轨：保留本地 Express + 新增 Pages Functions）
 
+> 按《路线指南 V2.0》第十五章，跳过阶段 2 局域网测试，直接上阶段 3 公网验证。
+> 采用**双轨**：`server/` 本地 Express 保持不变；新增 `functions/` 适配层走 Cloudflare，逻辑一致。
+
+**架构**
 ```
-Cloudflare Pages  →  静态前端（client/dist）
-Cloudflare Workers API  →  后端 API（需改造为 Workers 兼容，或自托管 Node 服务）
-Cloudflare D1 / 外部 SQLite  →  数据库（当前用 better-sqlite3，需替换为 D1 或托管数据库）
-Cloudflare R2  →  图片存储（当前 uploads/ 本地目录，需替换为 R2）
+Cloudflare Pages      →  静态前端（client/dist）
+Pages Functions       →  后端 API（functions/，Hono 路由）
+D1 (DB 绑定)          →  数据库（替代 better-sqlite3，异步）
+R2 (BUCKET 绑定)      →  图片存储（替代本地 uploads/ 目录）
 ```
 
-迁移到 Cloudflare 时需解决：① `better-sqlite3` 是原生模块，Workers 不支持，需改用 D1；② 图片上传需改用 R2；③ `sku.template.json` 主数据可保留（Workers 可读 KV/绑定）。本阶段不在当前 MVP 范围内，仅作路线预留。
+**前置**
+- 根目录依赖已加：`hono` / `wrangler` / `@cloudflare/workers-types`（`npm install`）
+- Cloudflare 账号 + API Token（权限：**Pages Edit / D1 Edit / R2 Edit**）
+
+**步骤**
+1. 创建 D1 与 R2（一次性）
+   - `wrangler d1 create ai-cc-prod-db` → 把返回 id 填入 `wrangler.toml` 的 `database_id`
+   - `wrangler r2 bucket create ai-cc-prod-uploads`
+2. 构建前端：`npm run build:client`（输出 `client/dist`；注意沙箱 safe-delete 钩子会拦截 vite 清空 dist，构建前先移走旧 `dist`）
+3. 本地联调（无需 token）：`npm run cf:dev`（= `wrangler pages dev client/dist --d1 DB --r2 BUCKET`），访问 http://localhost:8788
+4. 应用 D1 迁移：`wrangler d1 migrations apply ai-cc-prod-db --remote`
+5. 部署：`npm run cf:deploy`（= `wrangler pages deploy client/dist`）
+6. 访问分配的 `*.pages.dev` 域名，手机直接打开即可验证（跳过局域网）
+
+**迁移要点**
+- DB：better-sqlite3（同步）→ D1（异步），查询集中在 `functions/_lib/db.ts`
+- 上传：multer + 本地盘 → R2（`functions/_lib/r2.ts`），图片经 `/api/files/*` 同源返回，免 CORS
+- 主数据：复用 `server/src/config/sku.template.json`（`functions/_lib/sku.ts`）
+- 前端零改动：一直调用同源 `/api/*`，与 Pages Functions 路由完全对齐
 
 ### 当前阶段 1 验证
 

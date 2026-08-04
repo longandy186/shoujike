@@ -1,0 +1,20 @@
+# Cloudflare Pages 配置（替代本地 Express 单端口部署）
+# 部署：前端静态 (client/dist) + Pages Functions (functions/) + D1 + R2
+name = "ai-cc-prod"
+compatibility_date = "2025-08-01"
+pages_build_output_dir = "client/dist"
+
+# D1 数据库（替代本地 better-sqlite3）
+# 首次部署前执行：wrangler d1 create ai-cc-prod-db
+# 然后把下面 database_id 替换成命令返回的 id
+[[d1_databases]]
+binding = "DB"
+database_name = "ai-cc-prod-db"
+database_id = "e37caa71-6bcd-41ff-b57b-0a2328da2f1b"
+migrations_dir = "migrations"
+
+# 说明：图片改为内联存于 D1（images 表），不再依赖 R2，免去订阅。
+# 如需切回 R2，取消下面的绑定并在 functions/_lib/r2.ts 切回 R2 实现：
+# [[r2_buckets]]
+# binding = "BUCKET"
+# bucket_name = "ai-cc-prod-uploads"

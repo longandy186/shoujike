@@ -61,10 +61,11 @@ export async function ping() {
   return request<{ message: string; timestamp: number }>('/ping');
 }
 
-/** 上传图片 */
+/** 上传图片（前端压缩到适合 D1 内联存储的大小） */
 export async function uploadImage(file: File) {
+  const blob = await compressToJpeg(file, 1280, 600 * 1024);
   const formData = new FormData();
-  formData.append('image', file);
+  formData.append('image', blob, 'photo.jpg');
 
   try {
     const res = await fetch(`${API_BASE}/upload`, {
@@ -138,13 +139,13 @@ export async function stockIn(materialId: string, qty: number, note?: string) {
   });
 }
 
-/** 上传高清打印图（dataURL → 文件） */
+/** 上传高清打印图（dataURL → 压缩 JPEG → 上传） */
 export async function uploadPrint(orderId: string, dataUrl: string) {
-  // 将 dataURL 转为 blob 再上传
   const res = await fetch(dataUrl);
   const blob = await res.blob();
+  const compressed = await compressToJpeg(blob, 1600, 800 * 1024);
   const formData = new FormData();
-  formData.append('image', blob, 'print.png');
+  formData.append('image', compressed, 'print.jpg');
 
   try {
     const r = await fetch(`${API_BASE}/orders/${orderId}/print`, {
@@ -160,6 +161,59 @@ export async function uploadPrint(orderId: string, dataUrl: string) {
     const message = err instanceof Error ? err.message : '网络连接失败';
     return { ok: false, error: message };
   }
+}
+
+/**
+ * 将图片（File/Blob）缩放重压为 JPEG：目标最长边 maxDim、体积 < maxBytes，
+ * 避免 Base64 后超出 D1 单列存储上限。
+ */
+async function compressToJpeg(input: Blob, maxDim: number, maxBytes: number): Promise<Blob> {
+  const bitmap = await createImageBitmap(input);
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    bitmap.close?.();
+    return input;
+  }
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+
+  let q = 0.85;
+  let blob = await canvasToJpeg(canvas, q);
+  while (blob.size > maxBytes && q > 0.4) {
+    q = Math.round((q - 0.1) * 100) / 100;
+    blob = await canvasToJpeg(canvas, q);
+  }
+  // 若仍超，尺寸减半再压
+  if (blob.size > maxBytes) {
+    const c2 = document.createElement('canvas');
+    c2.width = Math.max(1, Math.round(w / 2));
+    c2.height = Math.max(1, Math.round(h / 2));
+    const c2ctx = c2.getContext('2d');
+    if (c2ctx) {
+      c2ctx.drawImage(canvas, 0, 0, c2.width, c2.height);
+      q = 0.8;
+      blob = await canvasToJpeg(c2, q);
+      let guard = 0;
+      while (blob.size > maxBytes && q > 0.4 && guard < 6) {
+        q = Math.round((q - 0.1) * 100) / 100;
+        blob = await canvasToJpeg(c2, q);
+        guard++;
+      }
+    }
+  }
+  return blob;
+}
+
+function canvasToJpeg(c: HTMLCanvasElement, q: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    c.toBlob((b) => (b ? resolve(b) : reject(new Error('图片压缩失败'))), 'image/jpeg', q);
+  });
 }
 
 export default {
