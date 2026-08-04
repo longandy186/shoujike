@@ -18,6 +18,6 @@ migrations_dir = "migrations"
 binding = "BUCKET"
 bucket_name = "ai-cc-prod-images-5f5df686"
 
-# 注：原 Durable Object（店员端 WebSocket 站内实时响铃）因部署令牌无 Worker 编辑权限，
-# 暂未上线。站内实时响铃改为由 Web Push 层驱动（Service Worker postMessage 唤醒页面）。
-# DO 绑定与 worker/ 目录保留，待令牌具备 Worker 权限后再启用。
+# 注：店员端 WebSocket 站内实时响铃（第二层）运行在独立 Worker ai-cc-prod-notifier。
+# Pages 函数通过普通 HTTP 调用该 Worker 的 /broadcast（Cloudflare 内网），无需跨脚本 DO 绑定。
+# Worker 地址硬编码于 functions/_lib/notify.ts（NOTIFIER_WORKER_URL，可用 Pages 环境变量覆盖）。

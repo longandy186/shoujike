@@ -236,8 +236,9 @@ NEW → WAITING_CHECK → READY_PRINT → PRINTED → PROCESSING → COMPLETED
 ### C — 来单响铃三层 + 外部电商 Webhook（任务 C）
 - **来单通知三层（按稳定性排序，非轮询）**：
   1. **Web Push（PWA，最稳定）第一层**：`client/public/manifest.webmanifest` + `client/public/sw.js` 注册 Service Worker；店员端打开即请求通知权限并订阅（`client/src/staffRealtime.ts` 的 `initStaffRealtime`）；新订单时 `functions/_lib/webpush.ts` 用 VAPID 密钥（`generateVapidKeys` 生成、存 Pages Secrets）对 payload 做 RFC 8291 aes128gcm 加密 + ES256 VAPID JWT 签名，推送后 Service Worker 显示通知并通过 `postMessage` 唤醒页面弹 Toast + 蜂鸣。
-  2. **Telegram（兜底）第三层**：配置 `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` 后，新订单同时推送 Telegram 消息。
-  > 说明：原计划第二层「WebSocket（Durable Object）站内实时」因当前 API Token 无 Worker 编辑权限暂未上线；站内实时响铃已并入 Web Push 层（仍非轮询、更稳）。Worker 宿主代码保留在 `worker/`，令牌加权限后可启用。
+  2. **WebSocket（Durable Object）站内实时 第二层（已上线）**：独立 Worker `ai-cc-prod-notifier`（`worker/`，部署于 `ai-cc-prod-notifier.longandy2026.workers.dev`）托管 `OrderNotifier` DO（按 id `global` 路由到单一实例）。店员端浏览器 WS 直连 `wss://ai-cc-prod-notifier.longandy2026.workers.dev/websocket`（`client/src/staffRealtime.ts`，断线 3s 自动重连）；来单时 `functions/_lib/notify.ts` 用普通 HTTP POST 该 Worker 的 `/broadcast` → DO 向所有在线 WS 推送 `new_order`，店员端弹 Toast + 蜂鸣（最像"屏幕前来单"体验，仅页面打开时有效）。
+  3. **Telegram（兜底）第三层**：配置 `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` 后，新订单同时推送 Telegram 消息。
+  > 说明：第二层 WebSocket/DO 最初因 API Token 无 Worker 编辑权限暂未上线；用户补全权限后已部署 `ai-cc-prod-notifier` Worker 并打通，三层全部生效。Worker 地址硬编码于 `functions/_lib/notify.ts`（`NOTIFIER_WORKER_URL`，可用 Pages 环境变量覆盖），店员端 WS 地址在 `client/.env` 的 `VITE_NOTIFIER_WS_URL`。
 - **外部电商 Webhook（零轮询接单）**：`POST /api/webhook/:channel`（`functions/_lib/webhook.ts`）统一入口，支持 `shopify` / `etsy` / `tiktok`（**非美团**等国内平台）：
   - `shopify`：`X-Shopify-Hmac-Sha256` = HMAC-SHA256(rawBody, `SHOPIFY_WEBHOOK_SECRET`)，base64
   - `etsy`：`X-Etsy-Signature` = HMAC-SHA256(rawBody, `ETSY_WEBHOOK_SECRET`)，base64

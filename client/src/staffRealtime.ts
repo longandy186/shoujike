@@ -39,28 +39,47 @@ async function setupPush(): Promise<void> {
   }
 }
 
-/** 连接 WebSocket，来单时回调 + 蜂鸣 */
+/** 连接 WebSocket（连到独立 notifier Worker 的 DO），来单时回调 + 蜂鸣；断线自动重连 */
 function setupWebSocket(onNewOrder: NewOrderCb): void {
-  try {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}/api/ws`);
-    ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data?.type === 'new_order') {
-          onNewOrder(data.pickup_code || '');
-          beep();
+  // 生产：连独立 Worker 的 DO；构建时由 VITE_NOTIFIER_WS_URL 注入（回退硬编码）
+  const wsUrl: string =
+    (import.meta.env.VITE_NOTIFIER_WS_URL as string | undefined) ||
+    'wss://ai-cc-prod-notifier.longandy2026.workers.dev/websocket';
+
+  let stopped = false;
+  let ws: WebSocket | null = null;
+
+  const connect = () => {
+    if (stopped) return;
+    try {
+      ws = new WebSocket(wsUrl);
+      ws.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data?.type === 'new_order') {
+            onNewOrder(data.pickup_code || '');
+            beep();
+          }
+        } catch {
+          /* ignore */
         }
-      } catch {
-        /* ignore */
-      }
-    };
-    ws.onerror = () => {
-      /* 连接失败静默，不影响 */
-    };
-  } catch {
-    /* ignore */
-  }
+      };
+      ws.onclose = () => {
+        if (!stopped) setTimeout(connect, 3000); // 断线 3s 后重连
+      };
+      ws.onerror = () => {
+        try {
+          ws?.close();
+        } catch {
+          /* ignore */
+        }
+      };
+    } catch {
+      if (!stopped) setTimeout(connect, 3000);
+    }
+  };
+
+  connect();
 }
 
 /** 网页蜂鸣（无需音频资源） */

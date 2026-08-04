@@ -28,7 +28,20 @@ export async function notifyNewOrder(env: Env, order: NewOrderNotify): Promise<v
     /* ignore */
   }
 
-  // 2) Telegram（兜底层）
+  // 2) WebSocket(DO) 站内实时（页面打开时的在线响铃，最像"屏幕前来单"体验）
+  // Pages 函数 → 独立 notifier Worker 的 /broadcast（Cloudflare 内网 HTTP，避开跨脚本 DO 绑定 API 差异）
+  try {
+    const base = env.NOTIFIER_WORKER_URL || 'https://ai-cc-prod-notifier.longandy2026.workers.dev';
+    await fetch(`${base}/broadcast`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'new_order', pickup_code: order.pickup_code }),
+    }).catch(() => {});
+  } catch {
+    /* ignore */
+  }
+
+  // 3) Telegram（兜底层）
   try {
     if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
       await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {

@@ -1,4 +1,5 @@
-# 通知用 Durable Object 宿主 Worker（Pages 通过 script_name 绑定）
+# 通知用 Durable Object 宿主 Worker（店员端站内实时响铃第二层）
+# 步骤 B：重新绑定并新建 OrderNotifier 类（clean state）
 name = "ai-cc-prod-notifier"
 main = "src/index.ts"
 compatibility_date = "2025-08-01"
@@ -8,5 +9,5 @@ name = "Notifier"
 class_name = "OrderNotifier"
 
 [[migrations]]
-tag = "v1"
-new_classes = ["OrderNotifier"]
+tag = "v5"
+new_sqlite_classes = ["OrderNotifier"]

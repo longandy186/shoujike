@@ -11,6 +11,8 @@ import type { D1Database, R2Bucket } from '@cloudflare/workers-types';
 export interface Env {
   DB: D1Database;
   BUCKET: R2Bucket;
+  /** notifier Worker 公网地址（店员端 WebSocket 站内实时响铃第二层）。Cloudflare 内网 HTTP 调用 /broadcast */
+  NOTIFIER_WORKER_URL?: string;
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;
   TELEGRAM_BOT_TOKEN?: string;
