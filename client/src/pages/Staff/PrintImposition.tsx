@@ -1,13 +1,19 @@
 /**
  * 拼版打印视图（Task 6 升级：真实拼版）
- * 勾选多个可打印订单 → 按各自 SKU 的物理尺寸在打印纸张上自动排版（拼版）
- * → 浏览器打印（@media print 只输出拼版纸张）。
+ * 勾选多个可打印订单 → 按各自 SKU 的物理尺寸(+出血)在打印纸张上自动排版（拼版）
+ * → 超出单页自动分页 → 浏览器打印 / 导出 PDF。
  *
- * 不引入 Sharp/PDFKit（属 Phase 3 技术示范，暂不开发），使用原生 Canvas 实现，
- * 纸张尺寸与产品尺寸均按 mm 换算，DPI 可选，保证拼版物理尺寸正确。
+ * 特性：
+ * - 每张图绘制「裁切实线」（物理尺寸边界）与「出血虚线」（bleed 外扩边界）
+ * - 排版算法：shelf 装箱 + 可选旋转（best-fit），比简单行优先更省纸（任务 B）
+ * - 缺料核算：生成前检查 BOM 总需求，库存不足则拦截并提示
+ * - 导出 PDF：用 jsPDF 把拼版页导出为多页 PDF（带出血/裁切标记），替代浏览器打印（任务 A）
+ *
+ * 不引入 Sharp / PDFKit（属 Phase 3 技术示范），拼版用原生 Canvas，PDF 用纯前端 jsPDF。
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { jsPDF } from 'jspdf';
 import { getOrders } from '../../api';
 import { getProductById } from '../Guest/products';
 
@@ -39,6 +45,123 @@ interface Props {
   onNavigate: (tab: 'orders' | 'inventory' | 'imposition') => void;
 }
 
+interface Shortage {
+  material: string;
+  need: number;
+  have: number;
+}
+
+interface Tile {
+  order: Order;
+  img: HTMLImageElement | null;
+  w: number; // 物理宽 mm
+  h: number; // 物理高 mm
+  bleed: number; // mm
+}
+
+interface Placed {
+  tile: Tile;
+  x: number; // px（含出血盒，相对 usable 区左上角）
+  y: number; // px
+  w: number; // px（含出血盒，旋转后）
+  h: number; // px（旋转后）
+  rotated: boolean;
+  code: string;
+}
+
+/**
+ * shelf 装箱 + 可选旋转（best-fit）排版算法（任务 B）
+ * - 按面积降序排列（best-bin-packing 启发式）
+ * - 每个 tile 尝试原始/旋转两种朝向，优先放入当前 shelf 剩余宽度，其次开新 shelf，再次开新页
+ * - allowRotate=false 时仅原始朝向（产品方向固定，如钥匙扣不可旋转）
+ */
+function packIntoShelves(
+  items: Array<{ w: number; h: number; tile: Tile }>,
+  W: number,
+  H: number,
+  gap: number,
+  allowRotate: boolean
+): Placed[][] {
+  const pages: Placed[][] = [];
+  let placed: Placed[] = [];
+  let shelfY = 0;
+  let shelfH = 0;
+  let cursorX = 0;
+
+  const newPage = () => {
+    if (placed.length) pages.push(placed);
+    placed = [];
+    shelfY = 0;
+    shelfH = 0;
+    cursorX = 0;
+  };
+
+  const sorted = [...items].sort((a, b) => b.w * b.h - a.w * a.h);
+
+  for (const it of sorted) {
+    const orients: Array<{ w: number; h: number; rot: boolean }> = allowRotate
+      ? [
+          { w: it.w, h: it.h, rot: false },
+          { w: it.h, h: it.w, rot: true },
+        ]
+      : [{ w: it.w, h: it.h, rot: false }];
+
+    let chosen: { w: number; h: number; rot: boolean } | null = null;
+
+    // 1) 尝试放入当前 shelf
+    for (const o of orients) {
+      if (cursorX + o.w <= W + 0.5 && (shelfH === 0 || o.h <= shelfH + 0.5)) {
+        chosen = o;
+        break;
+      }
+    }
+
+    // 2) 尝试开新 shelf（同一页）
+    if (!chosen) {
+      const newShelfY = shelfY + shelfH + gap;
+      for (const o of orients) {
+        if (newShelfY + o.h <= H + 0.5 && o.w <= W + 0.5) {
+          shelfY = newShelfY;
+          shelfH = o.h;
+          cursorX = 0;
+          chosen = o;
+          break;
+        }
+      }
+    }
+
+    // 3) 开新页
+    if (!chosen) {
+      newPage();
+      for (const o of orients) {
+        if (o.w <= W + 0.5 && o.h <= H + 0.5) {
+          shelfY = 0;
+          shelfH = o.h;
+          cursorX = 0;
+          chosen = o;
+          break;
+        }
+      }
+      if (!chosen) chosen = orients[0]; // 单张都放不下则仍放置（溢出）
+    }
+
+    placed.push({
+      tile: it.tile,
+      x: cursorX,
+      y: shelfY,
+      w: chosen.w,
+      h: chosen.h,
+      rotated: chosen.rot,
+      code: it.tile.order.pickup_code || it.tile.order.order_id.slice(0, 6),
+    });
+    cursorX += chosen.w + gap;
+    shelfH = Math.max(shelfH, chosen.h);
+  }
+
+  if (placed.length) pages.push(placed);
+  return pages;
+}
+
 export default function PrintImposition({ onNavigate }: Props) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -48,10 +171,15 @@ export default function PrintImposition({ onNavigate }: Props) {
   const [dpi, setDpi] = useState(150);
   const [margin, setMargin] = useState(10); // mm
   const [gap, setGap] = useState(3); // mm
+  const [allowRotate, setAllowRotate] = useState(false); // 任务 B：旋转装箱默认关（产品方向固定）
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  // 拼版结果（每页一个 dataURL）
+  const [pages, setPages] = useState<string[]>([]);
   const [placed, setPlaced] = useState(0);
-  const [fitting, setFitting] = useState(true);
+  const [generating, setGenerating] = useState(false);
+
+  // 缺料核算
+  const [shortage, setShortage] = useState<Shortage[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,6 +193,36 @@ export default function PrintImposition({ onNavigate }: Props) {
 
   useEffect(() => { load(); }, [load]);
 
+  // 缺料核算：所选订单 BOM 总需求 vs 当前库存
+  const computeShortage = useCallback(async () => {
+    if (selected.size === 0) { setShortage([]); return; }
+    const demand = new Map<string, number>();
+    for (const o of orders) {
+      if (!selected.has(o.order_id)) continue;
+      const prod = getProductById(o.master_sku);
+      for (const b of prod?.bom || []) {
+        demand.set(b.materialId, (demand.get(b.materialId) || 0) + b.qty);
+      }
+    }
+    if (demand.size === 0) { setShortage([]); return; }
+    try {
+      const res = await fetch('/api/inventory/summary');
+      const json = await res.json();
+      const mats = (json.data?.materials || []) as Array<{ material_id: string; name: string; current_stock: number }>;
+      const short: Shortage[] = [];
+      for (const [mid, need] of demand) {
+        const mat = mats.find((m) => m.material_id === mid);
+        const have = mat?.current_stock ?? 0;
+        if (need > have) short.push({ material: mat?.name || mid, need, have });
+      }
+      setShortage(short);
+    } catch {
+      setShortage([]);
+    }
+  }, [orders, selected]);
+
+  useEffect(() => { computeShortage(); }, [computeShortage]);
+
   const toggle = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -75,118 +233,128 @@ export default function PrintImposition({ onNavigate }: Props) {
   };
 
   const generate = useCallback(async () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (selected.size === 0) return;
+    setGenerating(true);
+
     const paper = PAPERS[paperIdx];
     const pxPerMm = dpi / 25.4;
     const W = Math.round(paper.w * pxPerMm);
     const H = Math.round(paper.h * pxPerMm);
-    canvas.width = W;
-    canvas.height = H;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // 白底
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, W, H);
-
     const marginPx = margin * pxPerMm;
     const gapPx = gap * pxPerMm;
     const usableW = W - 2 * marginPx;
     const usableH = H - 2 * marginPx;
+    const labelH = Math.max(12, Math.round(pxPerMm));
 
-    // 收集被勾选订单，按产品高度降序以便更紧凑排版
     const chosen = orders.filter((o) => selected.has(o.order_id));
-    const tiles = chosen.map((o) => {
+    const tiles: Tile[] = chosen.map((o) => {
       const prod = getProductById(o.master_sku);
-      const size = prod?.physicalSize;
-      const pw = size?.width ?? 50;
-      const ph = size?.height ?? 50;
-      return {
-        order: o,
-        imgUrl: o.print_url || o.image_url,
-        w: pw * pxPerMm,
-        h: ph * pxPerMm,
-      };
+      const pw = prod?.physicalSize?.width ?? 50;
+      const ph = prod?.physicalSize?.height ?? 50;
+      const bleed = prod?.bleed ?? 0;
+      return { order: o, img: null, w: pw, h: ph, bleed };
     });
-    tiles.sort((a, b) => b.h - a.h);
 
     // 预加载图片
-    const imgs = await Promise.all(
+    const loaded: Tile[] = await Promise.all(
       tiles.map(
         (t) =>
-          new Promise<{ img: HTMLImageElement | null; tile: typeof t }>((resolve) => {
-            if (!t.imgUrl) return resolve({ img: null, tile: t });
+          new Promise<Tile>((resolve) => {
+            if (!t.order.print_url && !t.order.image_url) return resolve(t);
             const im = new Image();
             im.crossOrigin = 'anonymous';
-            im.onload = () => resolve({ img: im, tile: t });
-            im.onerror = () => resolve({ img: null, tile: t });
-            im.src = t.imgUrl;
+            im.onload = () => resolve({ ...t, img: im });
+            im.onerror = () => resolve(t);
+            im.src = t.order.print_url || t.order.image_url;
           })
       )
     );
 
-    const labelH = Math.max(10, 6 * pxPerMm / 25.4 * 6); // 标签高度（约 12px@150dpi）
-    let x = marginPx;
-    let y = marginPx;
-    let rowMaxH = 0;
-    let count = 0;
-    let allFit = true;
+    // 计算每个 tile 含出血的像素盒尺寸，并排版
+    const boxes = loaded.map((t) => ({
+      w: (t.w + 2 * t.bleed) * pxPerMm,
+      h: (t.h + 2 * t.bleed) * pxPerMm,
+      tile: t,
+    }));
+    const pagesLayout = packIntoShelves(boxes, usableW, usableH, gapPx, allowRotate);
 
-    for (const { img, tile } of imgs) {
-      const tileW = tile.w;
-      const tileH = tile.h + labelH;
+    // 逐页渲染（content 区从 marginPx 起，但 packIntoShelves 已用 usableW/H，需平移到 margin）
+    const pagesData = pagesLayout.map((layout) => {
+      const cv = document.createElement('canvas');
+      cv.width = W;
+      cv.height = H;
+      const c = cv.getContext('2d');
+      if (!c) return '';
+      c.fillStyle = '#ffffff';
+      c.fillRect(0, 0, W, H);
 
-      if (x + tileW > marginPx + usableW + 0.5) {
-        // 换行
-        x = marginPx;
-        y += rowMaxH + gapPx;
-        rowMaxH = 0;
+      for (const it of layout) {
+        const fx = marginPx + it.x;
+        const fy = marginPx + it.y;
+        const fw = it.w;
+        const fh = it.h;
+        const bleedPx = it.tile.bleed * pxPerMm;
+
+        // 出血区底色
+        c.fillStyle = '#ffffff';
+        c.fillRect(fx, fy, fw, fh);
+
+        // 图片（cover 填满含出血的整块）
+        if (it.tile.img) {
+          const scale = Math.max(fw / it.tile.img.naturalWidth, fh / it.tile.img.naturalHeight);
+          const dw = it.tile.img.naturalWidth * scale;
+          const dh = it.tile.img.naturalHeight * scale;
+          c.drawImage(it.tile.img, fx + (fw - dw) / 2, fy + (fh - dh) / 2, dw, dh);
+        } else {
+          c.fillStyle = '#cccccc';
+          c.fillRect(fx, fy, fw, fh);
+        }
+
+        // 出血虚线（外边界）
+        c.strokeStyle = '#999999';
+        c.lineWidth = 1;
+        c.setLineDash([4, 3]);
+        c.strokeRect(fx, fy, fw, fh);
+        c.setLineDash([]);
+
+        // 裁切实线（物理尺寸内边界）
+        const cx = fx + bleedPx;
+        const cy = fy + bleedPx;
+        const cw = fw - 2 * bleedPx;
+        const ch = fh - 2 * bleedPx;
+        c.strokeStyle = '#000000';
+        c.lineWidth = Math.max(1, pxPerMm * 0.15);
+        c.strokeRect(cx, cy, cw, ch);
+
+        // 取件码标签
+        c.fillStyle = '#000000';
+        c.font = `${Math.round(labelH * 0.7)}px sans-serif`;
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillText(`#${it.code}`, fx + fw / 2, fy + fh + labelH / 2);
       }
-      if (y + tileH > marginPx + usableH + 0.5) {
-        allFit = false;
-        break;
-      }
+      return cv.toDataURL('image/png');
+    });
 
-      // 图片区（cover 裁切）
-      const ix = x;
-      const iy = y;
-      const iw = tileW;
-      const ih = tile.h;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(ix, iy, iw, ih);
-      if (img) {
-        const scale = Math.max(iw / img.naturalWidth, ih / img.naturalHeight);
-        const dw = img.naturalWidth * scale;
-        const dh = img.naturalHeight * scale;
-        ctx.drawImage(img, ix + (iw - dw) / 2, iy + (ih - dh) / 2, dw, dh);
-      } else {
-        ctx.fillStyle = '#cccccc';
-        ctx.fillRect(ix, iy, iw, ih);
-      }
-      // 边框
-      ctx.strokeStyle = '#333333';
-      ctx.lineWidth = Math.max(1, pxPerMm * 0.2);
-      ctx.strokeRect(ix, iy, iw, ih);
-
-      // 取件码标签
-      ctx.fillStyle = '#000000';
-      ctx.font = `${Math.round(labelH * 0.7)}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(`#${tile.order.pickup_code || tile.order.order_id.slice(0, 6)}`, ix + iw / 2, iy + ih + labelH / 2);
-
-      x += tileW + gapPx;
-      rowMaxH = Math.max(rowMaxH, tileH);
-      count++;
-    }
-
-    setPlaced(count);
-    setFitting(allFit && count === tiles.length);
-  }, [orders, selected, paperIdx, dpi, margin, gap]);
+    setPages(pagesData);
+    setPlaced(chosen.length);
+    setGenerating(false);
+  }, [orders, selected, paperIdx, dpi, margin, gap, allowRotate]);
 
   const handlePrint = () => window.print();
+
+  // 任务 A：导出 PDF（jsPDF，纯前端）
+  const handleExportPdf = () => {
+    if (pages.length === 0) return;
+    const paper = PAPERS[paperIdx];
+    const orientation = paper.w > paper.h ? 'landscape' : 'portrait';
+    const pdf = new jsPDF({ unit: 'mm', format: [paper.w, paper.h], orientation });
+    pages.forEach((src, i) => {
+      if (i > 0) pdf.addPage([paper.w, paper.h], orientation);
+      pdf.addImage(src, 'PNG', 0, 0, paper.w, paper.h);
+    });
+    pdf.save(`imposition-${Date.now()}.pdf`);
+  };
 
   return (
     <div className="staff-page-inner">
@@ -222,6 +390,10 @@ export default function PrintImposition({ onNavigate }: Props) {
           间距(mm)
           <input type="number" min="0" value={gap} onChange={(e) => setGap(Number(e.target.value))} />
         </label>
+        <label className="imp-rotate">
+          <input type="checkbox" checked={allowRotate} onChange={(e) => setAllowRotate(e.target.checked)} />
+          允许旋转(省纸)
+        </label>
       </section>
 
       {/* 订单选择 */}
@@ -245,30 +417,43 @@ export default function PrintImposition({ onNavigate }: Props) {
         )}
       </section>
 
-      {/* 操作 */}
-      <section className="imp-actions">
-        <button className="btn-impose" onClick={generate} disabled={selected.size === 0}>
-          🧩 生成拼版
-        </button>
-        <button className="btn-print-sheet" onClick={handlePrint} disabled={placed === 0}>
-          🖨️ 打印
-        </button>
-      </section>
-      {placed > 0 && (
-        <div className={`imp-result ${fitting ? 'ok' : 'warn'}`}>
-          {fitting
-            ? `✅ 已排版 ${placed} 张到 ${PAPERS[paperIdx].label}`
-            : `⚠️ 纸张空间不足，已排版 ${placed} 张（共选 ${selected.size} 张），请换更大纸张或减少选择`}
+      {/* 缺料提示 */}
+      {shortage.length > 0 && (
+        <div className="imp-shortage">
+          ⚠️ 物料不足，无法生成拼版：
+          {shortage.map((s) => (
+            <span key={s.material} className="imp-shortage-item">
+              {s.material}（需 {s.need} / 余 {s.have}）
+            </span>
+          ))}
+          <span className="imp-shortage-hint">请先到「库存」页补货</span>
         </div>
       )}
 
-      {/* 拼版预览（打印时仅显示此区域） */}
+      {/* 操作 */}
+      <section className="imp-actions">
+        <button className="btn-impose" onClick={generate} disabled={selected.size === 0 || shortage.length > 0 || generating}>
+          {generating ? '生成中...' : '🧩 生成拼版'}
+        </button>
+        <button className="btn-print-sheet" onClick={handlePrint} disabled={pages.length === 0}>
+          🖨️ 打印
+        </button>
+        <button className="btn-export-pdf" onClick={handleExportPdf} disabled={pages.length === 0}>
+          📄 导出 PDF
+        </button>
+      </section>
+      {placed > 0 && (
+        <div className="imp-result ok">
+          ✅ 已排版 {placed} 张，共 {pages.length} 页（{PAPERS[paperIdx].label}）
+          {allowRotate && ' · 已启用旋转省纸'}
+        </div>
+      )}
+
+      {/* 拼版预览（打印时仅显示这些页） */}
       <div className="print-sheet-wrap">
-        <canvas
-          ref={canvasRef}
-          className="print-sheet"
-          style={{ width: `${PAPERS[paperIdx].w}mm`, height: `${PAPERS[paperIdx].h}mm` }}
-        />
+        {pages.map((src, i) => (
+          <img key={i} className="imp-page" src={src} alt={`拼版第 ${i + 1} 页`} style={{ width: `${PAPERS[paperIdx].w}mm`, height: `${PAPERS[paperIdx].h}mm` }} />
+        ))}
       </div>
 
       <nav className="inv-tabbar">

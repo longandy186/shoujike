@@ -15,7 +15,7 @@
 | 前端 | React 18 + Vite 6 + TypeScript 5.6 |
 | 后端 | Node.js + Express 4 + TypeScript |
 | 数据库 | SQLite (better-sqlite3) |
-| 图片处理 | 原生 Canvas API（Fabric.js 在 Windows 下编译失败，改用原生实现） |
+| 图片处理 | Konva.js（纯 JS Canvas 库，替代原生 Canvas 实现，避免 Fabric.js 原生编译问题） |
 | 产品主数据 | `sku.template.json` 驱动（Master SKU 体系，Phase 1.5） |
 
 ## 项目结构
@@ -193,7 +193,13 @@ NEW → WAITING_CHECK → READY_PRINT → PRINTED → PROCESSING → COMPLETED
   - [x] 勾选多个可打印订单（READY_PRINT/PRINTED/...），按各自 SKU 物理尺寸在打印纸张上自动排版
   - [x] 支持纸张（A4/A5/6寸/5寸）、DPI（72/150/300）、边距/间距参数
   - [x] 原生 Canvas 拼版（cover 裁切 + 取件码标注），`@media print` 仅输出拼版纸张，浏览器直接打印
-  - [x] 不引入 Sharp/PDFKit（属 Phase 3 技术示范，暂不开发），保持 MVP 原生 Canvas 方案
+  - [x] **拼版增强**：每张图绘制「裁切实线」(物理尺寸边界) + 「出血虚线」(bleed 外扩)，bleed 取自 SKU `printSettings.bleed`
+  - [x] **多页自动分页**：订单超出单页时自动分多张纸，打印时每页独立成张（`page-break-after: always`）
+  - [x] **排版算法升级（任务 B）**：shelf 装箱 + 可选旋转（best-fit），按面积降序放置，比简单行优先更省纸；旋转开关默认关（产品方向固定，如钥匙扣不可旋转）
+  - [x] **导出 PDF（任务 A）**：用纯前端 `jsPDF` 把拼版页导出为多页 PDF（带出血/裁切标记），替代浏览器打印对话框，无需 PDFKit 原生依赖
+  - [x] **缺料拦截**：生成拼版前按所选订单 BOM 核算总需求，库存不足则拦截并列出缺料清单（提示先去库存页补货）
+  - [x] **首页红点**：店员「库存」Tab 在存在低库存预警时显示数量徽标（来自 `GET /api/inventory/alerts`）
+  - [x] 拼版导出 PDF 用纯前端 `jsPDF`（替代 Phase 3 计划的 PDFKit，无原生依赖）；Sharp 300DPI 出图仍属 Phase 3 未做
 - [x] 部署（阶段 1 本地生产运行 + 阶段 3 Cloudflare 架构说明）
 
 ### Phase 1.5 说明（Master SKU 与 BOM）
@@ -202,11 +208,11 @@ NEW → WAITING_CHECK → READY_PRINT → PRINTED → PROCESSING → COMPLETED
 - **BOM 扣减**：店员将订单状态改为 `COMPLETED` 时，后端按该 SKU 的 `bom` 逐项扣减并写 `bom_consumption_log`（同时写 `inventory_transactions` 的 OUT 流水）；已扣减订单再次完成会被幂等跳过；扣减后跌破安全线自动生成 `inventory_alerts` 预警记录。
 - **库存统计**：`inventory_transactions` 记录所有 IN/OUT 流水，「已使用数量」= 历史 OUT 之和；采购入库走 `POST /api/inventory/stock-in`，写 IN 流水并增加 `current_stock`。
 - **前端驱动**：游客端产品列表改由 `GET /api/skus` 拉取（后端不可用时回退到 `products.ts` 静态兜底），店员端产品名映射仍走同一来源。
-- **范围边界**：后端 Sharp 300DPI 出图、PDFKit 自动拼版、Fabric.js 重构属 Phase 3 / 后期，未做；拼版打印当前用前端原生 Canvas 实现。
+- **范围边界**：后端 Sharp 300DPI 出图属 Phase 3 / 后期，未做；拼版打印用前端原生 Canvas 实现，拼版导出 PDF 用纯前端 `jsPDF`（已完成，替代 PDFKit 原生依赖）；图片编辑器已用 `Konva.js`（纯 JS）重写。
 
 ### 打印流程说明（Task 6 + 拼版）
-- **单张打印图**：店员在编辑页调整好裁剪后，点击「生成打印图」→ 前端 `ImageEditor` 通过 `forwardRef` 暴露 `exportPrintImage(scale=3)`，在离屏 Canvas 按 3 倍分辨率渲染（约 1080px），输出 PNG dataURL → `POST /api/orders/:orderId/print` 上传，后端存入 `uploads/` 并写入订单 `print_url`。生成后可点击「查看打印图」在新标签打开人工打印。
-- **批量拼版打印**：店员切到「拼版」Tab → 勾选多个可打印订单 → 设置纸张/DPI/边距/间距 → 「生成拼版」按各自 SKU 物理尺寸在纸张上自动排版（cover 裁切 + 取件码标注）→「打印」触发浏览器打印（`@media print` 只输出拼版纸张）。设计取舍：未引入 `canvas` 依赖（Windows 无 VS 编译环境 + 沙箱安全钩子拦截安装），改在前端浏览器 Canvas 完成渲染。
+- **单张打印图**：店员在编辑页用 `ImageEditor`（Konva.js 渲染）调整好裁剪后，点击「生成打印图」→ 通过 `forwardRef` 暴露的 `exportPrintImage(scale=3)`，用 Konva Stage 高分辨率导出（约 1080px）PNG dataURL → `POST /api/orders/:orderId/print` 上传，后端存入 `uploads/` 并写入订单 `print_url`。生成后可点击「查看打印图」在新标签打开人工打印。
+- **批量拼版打印**：店员切到「拼版」Tab → 勾选多个可打印订单 → 设置纸张/DPI/边距/间距（可选「允许旋转」省纸）→「生成拼版」按各自 SKU 物理尺寸(+出血)在纸张上自动排版（shelf 装箱 + 可选旋转，裁切实线 + 出血虚线 + 取件码标注）→ 可「打印」（浏览器打印，每页独立成张）或「导出 PDF」（jsPDF 多页 PDF）。订单超出单页时自动分页。生成前会核算 BOM 物料需求，库存不足则拦截并提示缺料。设计取舍：拼版渲染用前端原生 Canvas，PDF 导出用纯前端 `jsPDF`，均无需原生模块（避开 Windows 无 VS 编译 + 沙箱安全钩子的限制）。
 
 ## MVP 禁止开发内容
 

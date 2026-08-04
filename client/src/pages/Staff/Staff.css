@@ -108,6 +108,8 @@
 .imp-settings label { display: flex; flex-direction: column; font-size: 0.7rem; opacity: 0.7; gap: 0.25rem; }
 .imp-settings select, .imp-settings input { padding: 0.45rem; border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: #e0e0e0; font-size: 0.85rem; }
 .imp-settings input[type="number"] { width: 70px; }
+.imp-settings .imp-rotate { flex-direction: row; align-items: center; gap: 0.4rem; opacity: 0.85; }
+.imp-settings .imp-rotate input { width: auto; }
 .imp-section { padding: 0.8rem 1rem; }
 .imp-order-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
 .imp-chip { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.6rem; background: #161b22; border: 1px solid #21262d; border-radius: 8px; font-size: 0.78rem; cursor: pointer; }
@@ -120,16 +122,27 @@
 .btn-impose:disabled { opacity: 0.5; }
 .btn-print-sheet { flex: 1; padding: 0.75rem; border: none; border-radius: 8px; background: #e94560; color: #fff; font-weight: 600; cursor: pointer; font-size: 0.95rem; }
 .btn-print-sheet:disabled { opacity: 0.5; }
+.btn-export-pdf { flex: 1; padding: 0.75rem; border: none; border-radius: 8px; background: #3fb950; color: #fff; font-weight: 600; cursor: pointer; font-size: 0.95rem; }
+.btn-export-pdf:disabled { opacity: 0.5; }
 .imp-result { margin: 0 1rem; padding: 0.5rem 0.7rem; border-radius: 6px; font-size: 0.82rem; }
 .imp-result.ok { background: #23863622; color: #3fb950; }
 .imp-result.warn { background: #e9456022; color: #e94560; }
-.print-sheet-wrap { padding: 1rem; display: flex; justify-content: center; overflow: auto; }
-.print-sheet { background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,0.5); max-width: 100%; }
+.print-sheet-wrap { padding: 1rem; display: flex; flex-direction: column; align-items: center; gap: 0.6rem; overflow: auto; }
+.imp-page { background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,0.5); max-width: 100%; }
 
-/* 打印时只输出拼版纸张 */
+/* 缺料提示 */
+.imp-shortage { margin: 0 1rem; padding: 0.6rem 0.8rem; border-radius: 8px; background: #e9456022; color: #ff7b92; font-size: 0.85rem; line-height: 1.6; }
+.imp-shortage-item { display: inline-block; margin: 0 0.4rem; padding: 0.1rem 0.5rem; background: #e9456033; border-radius: 4px; }
+.imp-shortage-hint { display: block; margin-top: 0.3rem; color: #8b949e; }
+
+/* 库存红点 */
+.inv-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: 4px; padding: 0 5px; border-radius: 9px; background: #e94560; color: #fff; font-size: 0.7rem; font-weight: 700; line-height: 1; vertical-align: middle; }
+
+/* 打印时只输出拼版页（每页独立成张） */
 @media print {
   body * { visibility: hidden !important; }
   .print-sheet-wrap, .print-sheet-wrap * { visibility: visible !important; }
-  .print-sheet-wrap { position: absolute; left: 0; top: 0; padding: 0; }
-  .print-sheet { box-shadow: none; max-width: none; }
+  .print-sheet-wrap { position: absolute; left: 0; top: 0; padding: 0; gap: 0; }
+  .imp-page { box-shadow: none; max-width: none; page-break-after: always; }
+  .imp-page:last-child { page-break-after: auto; }
 }

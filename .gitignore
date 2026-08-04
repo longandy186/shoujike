@@ -50,9 +50,3 @@ npm-debug.log*
 
 # TypeScript
 *.tsbuildinfo
-
-# Local test databases (server runtime)
-server/*.db
-server/*.db-*
-server/*.db-wal
-server/*.db-shm

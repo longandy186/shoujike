@@ -27,6 +27,10 @@ export interface Product {
   enabled: boolean;
   /** 物理尺寸（拼版打印用，mm） */
   physicalSize?: { width: number; height: number; unit: string };
+  /** 出血值（mm，拼版裁切标记用） */
+  bleed?: number;
+  /** BOM 物料清单（缺料核算用） */
+  bom?: { materialId: string; qty: number }[];
 }
 
 /**
@@ -76,6 +80,10 @@ export async function fetchProducts(force = false): Promise<Product[]> {
         icon: String(p.icon ?? '📦'),
         enabled: Boolean(p.enabled ?? true),
         physicalSize: p.physicalSize as { width: number; height: number; unit: string } | undefined,
+        bleed: typeof p.printSettings === 'object' && p.printSettings ? Number((p.printSettings as Record<string, unknown>).bleed) || 0 : 0,
+        bom: Array.isArray(p.bom)
+          ? (p.bom as Array<Record<string, unknown>>).map((b) => ({ materialId: String(b.materialId ?? ''), qty: Number(b.qty ?? 0) }))
+          : undefined,
       }));
       // 后端可能返回全部（含禁用），这里只取启用；若后端已过滤则全部保留
       const enabled = mapped.filter((p) => p.enabled);

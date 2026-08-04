@@ -57,6 +57,9 @@ export default function StaffPage() {
   // 状态筛选
   const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'READY' | 'DONE'>('ALL');
 
+  // 低库存预警数量（店员首页红点）
+  const [alertCount, setAlertCount] = useState(0);
+
   // 取件码查询
   const [lookupCode, setLookupCode] = useState('');
   const [lookupError, setLookupError] = useState('');
@@ -81,6 +84,18 @@ export default function StaffPage() {
   }, []);
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
+
+  // 拉取低库存预警数量（用于首页红点）
+  const loadAlerts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/inventory/alerts');
+      const json = await res.json();
+      setAlertCount(Array.isArray(json.data) ? json.data.length : 0);
+    } catch {
+      setAlertCount(0);
+    }
+  }, []);
+  useEffect(() => { loadAlerts(); }, [loadAlerts]);
 
   // 按筛选过滤
   const filteredOrders = useMemo(() => {
@@ -175,6 +190,7 @@ export default function StaffPage() {
     if (res.ok) {
       setEditingOrder(res.data as Order);
       loadOrders();
+      loadAlerts();
     }
   };
 
@@ -261,7 +277,9 @@ export default function StaffPage() {
 
       <nav className="inv-tabbar inv-tabbar-top">
         <button onClick={() => setTab('orders')} className="active">📋 订单</button>
-        <button onClick={() => setTab('inventory')}>📦 库存</button>
+        <button onClick={() => setTab('inventory')}>
+          📦 库存{alertCount > 0 && <span className="inv-badge">{alertCount}</span>}
+        </button>
         <button onClick={() => setTab('imposition')}>🖨️ 拼版</button>
       </nav>
 

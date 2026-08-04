@@ -1,11 +1,13 @@
 /**
- * 图片裁剪编辑器 — 原生 Canvas 实现
+ * 图片裁剪编辑器 — 基于 Konva.js 实现（任务 C 升级）
  *
- * 功能：拖动 / 缩放 / cover 裁切 / 保存调整参数 / 导出高清打印图
+ * 取代原先的原生 Canvas 实现，获得图层 / 变换手柄 / 拖拽缩放等能力，
+ * 并保持一致的对内 API：
+ *   - Props: imageUrl / width / height / initialCrop / onCropChange
+ *   - CropData { x, y, scale, canvasW, canvasH }
+ *   - forwardRef 暴露 exportPrintImage(scale) → PNG dataURL（店员端上传打印图用）
  *
- * 数据流：
- *   cropData { x, y, scale, canvasW, canvasH }
- *   实际绘制时：图片以 (x, y) 为中心，缩放 scale 倍，超出的部分被 canvas clip
+ * 数据流：图片以 (canvasW/2 + x, canvasH/2 + y) 为中心，缩放 scale 倍，超出 canvas 部分被 Group clip 裁掉（cover 裁切）。
  */
 
 import {
@@ -16,6 +18,8 @@ import {
   useState,
   useImperativeHandle,
 } from 'react';
+import { Stage, Layer, Group, Image as KonvaImage, Rect } from 'react-konva';
+import Konva from 'konva';
 
 export interface CropData {
   /** 图片中心 X 偏移（px，相对于 canvas 中心） */
@@ -55,30 +59,19 @@ const ImageEditor = forwardRef<ImageEditorHandle, Props>(function ImageEditor(
   { imageUrl, width = 360, height, initialCrop, onCropChange },
   ref
 ) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imageRef = useRef<HTMLImageElement | null>(null);
-
-  // 视口尺寸
   const canvasW = width;
-  const canvasH = height || width; // 默认正方形
+  const canvasH = height || width;
 
-  // 状态
+  const stageRef = useRef<Konva.Stage>(null);
+  const [img, setImg] = useState<HTMLImageElement | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
   const [scale, setScale] = useState(initialCrop?.scale || 1);
   const [offsetX, setOffsetX] = useState(initialCrop?.x || 0);
   const [offsetY, setOffsetY] = useState(initialCrop?.y || 0);
-  const [loaded, setLoaded] = useState(false);
-  const [imgNaturalW, setImgNaturalW] = useState(0);
-  const [imgNaturalH, setImgNaturalH] = useState(0);
-
-  // 拖动状态
-  const dragging = useRef(false);
-  const dragStart = useRef({ x: 0, y: 0 });
-  const dragOffsetStart = useRef({ x: 0, y: 0 });
 
   // 最小缩放 = cover 裁切（图片刚好覆盖 canvas）
-  const minScale = imgNaturalW && imgNaturalH
-    ? Math.max(canvasW / imgNaturalW, canvasH / imgNaturalH)
-    : 1;
+  const minScale = img ? Math.max(canvasW / img.width, canvasH / img.height) : 1;
 
   // 发射 crop 数据
   const emitCrop = useCallback(() => {
@@ -91,119 +84,49 @@ const ImageEditor = forwardRef<ImageEditorHandle, Props>(function ImageEditor(
     });
   }, [offsetX, offsetY, scale, canvasW, canvasH, onCropChange]);
 
-  // 核心绘制逻辑（可复用于屏幕与导出）
-  const paint = useCallback(
-    (ctx: CanvasRenderingContext2D, w: number, h: number, s: number, ox: number, oy: number, img: HTMLImageElement) => {
-      ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, w, h);
-
-      const cx = w / 2 + ox;
-      const cy = h / 2 + oy;
-      const sw = img.naturalWidth * s;
-      const sh = img.naturalHeight * s;
-
-      // cover 裁切
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 0, w, h);
-      ctx.clip();
-      ctx.drawImage(img, cx - sw / 2, cy - sh / 2, sw, sh);
-      ctx.restore();
-    },
-    []
-  );
-
-  // 绘制屏幕 canvas
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    const img = imageRef.current;
-    if (!canvas || !img) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    paint(ctx, canvasW, canvasH, scale, offsetX, offsetY, img);
-  }, [canvasW, canvasH, scale, offsetX, offsetY, paint]);
-
   // 加载图片
   useEffect(() => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      imageRef.current = img;
-      setImgNaturalW(img.naturalWidth);
-      setImgNaturalH(img.naturalHeight);
-
-      const initScale = Math.max(canvasW / img.naturalWidth, canvasH / img.naturalHeight);
-      if (!initialCrop?.scale) {
-        setScale(initScale);
-      }
+    const im = new Image();
+    im.crossOrigin = 'anonymous';
+    im.onload = () => {
+      setImg(im);
+      const initScale = Math.max(canvasW / im.width, canvasH / im.height);
+      if (!initialCrop?.scale) setScale(initScale);
       setLoaded(true);
     };
-    img.src = imageUrl;
+    im.src = imageUrl;
   }, [imageUrl, canvasW, canvasH, initialCrop]);
 
-  // 重绘
-  useEffect(() => {
-    if (loaded) draw();
-  }, [loaded, offsetX, offsetY, scale, draw]);
+  // 暴露导出方法（用 Konva Stage 高分辨率导出，clip 保证只输出 canvas 区域）
+  useImperativeHandle(
+    ref,
+    () => ({
+      exportPrintImage: (exportScale = 3) => {
+        const stage = stageRef.current;
+        if (!stage || !loaded) return null;
+        try {
+          return stage.toDataURL({ pixelRatio: exportScale, mimeType: 'image/png' });
+        } catch {
+          return null;
+        }
+      },
+    }),
+    [loaded]
+  );
 
-  // 暴露导出方法
-  useImperativeHandle(ref, () => ({
-    exportPrintImage: (exportScale = 3) => {
-      const img = imageRef.current;
-      if (!img || !loaded) return null;
-      const out = document.createElement('canvas');
-      out.width = Math.round(canvasW * exportScale);
-      out.height = Math.round(canvasH * exportScale);
-      const ctx = out.getContext('2d');
-      if (!ctx) return null;
-      paint(ctx, out.width, out.height, scale * exportScale, offsetX * exportScale, offsetY * exportScale, img);
-      return out.toDataURL('image/png');
-    },
-  }), [loaded, canvasW, canvasH, scale, offsetX, offsetY, paint]);
-
-  // -------------------- 事件处理 --------------------
-
-  const getPos = (e: React.MouseEvent | React.TouchEvent) => {
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    return { x: clientX - rect.left, y: clientY - rect.top };
+  // 拖动：更新图片中心偏移
+  const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
+    const node = e.target;
+    setOffsetX(node.x() - canvasW / 2);
+    setOffsetY(node.y() - canvasH / 2);
   };
+  const handleDragEnd = () => emitCrop();
 
-  const handleStart = (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    const pos = getPos(e);
-    dragging.current = true;
-    dragStart.current = pos;
-    dragOffsetStart.current = { x: offsetX, y: offsetY };
-  };
-
-  const handleMove = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!dragging.current) return;
-    e.preventDefault();
-    const pos = getPos(e);
-    const dx = pos.x - dragStart.current.x;
-    const dy = pos.y - dragStart.current.y;
-    setOffsetX(dragOffsetStart.current.x + dx);
-    setOffsetY(dragOffsetStart.current.y + dy);
-  };
-
-  const handleEnd = () => {
-    if (dragging.current) {
-      dragging.current = false;
-      emitCrop();
-    }
-  };
-
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.05 : 0.05;
-    setScale((prev) => {
-      const next = Math.max(minScale * 0.8, Math.min(prev + delta, 3));
-      return Math.round(next * 100) / 100;
-    });
+  // 滚轮缩放
+  const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
+    e.evt.preventDefault();
+    const delta = e.evt.deltaY > 0 ? -0.05 : 0.05;
+    setScale((prev) => Math.round(Math.max(minScale * 0.8, Math.min(prev + delta, 3)) * 100) / 100);
     setTimeout(emitCrop, 100);
   };
 
@@ -217,21 +140,37 @@ const ImageEditor = forwardRef<ImageEditorHandle, Props>(function ImageEditor(
 
   return (
     <div className="image-editor">
-      <canvas
-        ref={canvasRef}
-        width={canvasW * 2}
-        height={canvasH * 2}
-        style={{ width: canvasW, height: canvasH }}
-        className="editor-canvas"
-        onMouseDown={handleStart}
-        onMouseMove={handleMove}
-        onMouseUp={handleEnd}
-        onMouseLeave={handleEnd}
-        onTouchStart={handleStart}
-        onTouchMove={handleMove}
-        onTouchEnd={handleEnd}
+      <Stage
+        ref={stageRef}
+        width={canvasW}
+        height={canvasH}
+        style={{ width: canvasW, height: canvasH, borderRadius: 8, cursor: 'grab', touchAction: 'none' }}
         onWheel={handleWheel}
-      />
+      >
+        <Layer>
+          {/* 白色底，避免透明 */}
+          <Rect x={0} y={0} width={canvasW} height={canvasH} fill="#ffffff" />
+          {/* clip 到 canvas 区域，实现 cover 裁切 */}
+          <Group clipX={0} clipY={0} clipWidth={canvasW} clipHeight={canvasH}>
+            {img && (
+              <KonvaImage
+                image={img}
+                width={img.width}
+                height={img.height}
+                offsetX={img.width / 2}
+                offsetY={img.height / 2}
+                x={canvasW / 2 + offsetX}
+                y={canvasH / 2 + offsetY}
+                scaleX={scale}
+                scaleY={scale}
+                draggable
+                onDragMove={handleDragMove}
+                onDragEnd={handleDragEnd}
+              />
+            )}
+          </Group>
+        </Layer>
+      </Stage>
 
       <div className="editor-controls">
         <button onClick={() => setScale((s) => Math.round(Math.min(s + 0.1, 3) * 100) / 100)} title="放大">
@@ -246,7 +185,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, Props>(function ImageEditor(
       </div>
 
       <div className="editor-hint">
-        拖动移动 · 滚轮缩放 · cover 裁切
+        拖动移动 · 滚轮缩放 · cover 裁切（Konva）
       </div>
 
       <style>{`
