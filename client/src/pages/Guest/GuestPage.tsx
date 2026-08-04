@@ -5,12 +5,12 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { uploadImage, createOrder } from '../../api';
+import { uploadImage, createOrder, getOrderByCode } from '../../api';
 import { fetchProducts, getEnabledProducts, type Product } from './products';
 import './Guest.css';
 
 export default function GuestPage() {
-  const [step, setStep] = useState<'select' | 'upload' | 'preview' | 'success'>('select');
+  const [step, setStep] = useState<'select' | 'upload' | 'preview' | 'success' | 'query'>('select');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>('');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -20,6 +20,34 @@ export default function GuestPage() {
   const [createdOrderId, setCreatedOrderId] = useState<string>('');
   const [pickupCode, setPickupCode] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 凭取件码查询状态
+  const [queryCode, setQueryCode] = useState('');
+  const [queryResult, setQueryResult] = useState<{ status: string; reason?: string; pickup_code?: string } | null>(null);
+  const [queryError, setQueryError] = useState('');
+
+  const STATUS_LABEL: Record<string, string> = {
+    NEW: '待处理',
+    WAITING_CHECK: '待审核',
+    READY_PRINT: '可打印',
+    PRINTED: '已打印',
+    PROCESSING: '制作中',
+    COMPLETED: '已完成',
+    REJECTED: '已驳回，请重传',
+  };
+
+  const handleQuery = async () => {
+    if (!queryCode.trim()) return;
+    setQueryError('');
+    setQueryResult(null);
+    const res = await getOrderByCode(queryCode.trim());
+    if (res.ok && res.data) {
+      const o = res.data as { status: string; feedback_reason?: string; pickup_code?: string };
+      setQueryResult({ status: o.status, reason: o.feedback_reason, pickup_code: o.pickup_code });
+    } else {
+      setQueryError('未找到该取件码对应的订单');
+    }
+  };
 
   // Phase 1.5：从后端 SKU 接口拉取产品（带静态兜底）
   const [products, setProducts] = useState<Product[]>(getEnabledProducts());
@@ -144,6 +172,42 @@ export default function GuestPage() {
               </button>
             ))}
           </div>
+          <button className="btn-query" onClick={() => { setQueryResult(null); setQueryError(''); setStep('query'); }}>
+            🔍 查询订单状态
+          </button>
+        </div>
+      )}
+
+      {/* 查询订单状态 */}
+      {step === 'query' && (
+        <div className="guest-section">
+          <h2 className="section-title">查询订单状态</h2>
+          <div className="query-bar">
+            <input
+              type="text"
+              placeholder="输入取件码..."
+              value={queryCode}
+              onChange={(e) => setQueryCode(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleQuery()}
+            />
+            <button onClick={handleQuery}>查询</button>
+          </div>
+          {queryError && <div className="guest-error">{queryError}</div>}
+          {queryResult && (
+            <div className="query-result">
+              <div className="query-status">状态：{STATUS_LABEL[queryResult.status] || queryResult.status}</div>
+              {queryResult.status === 'REJECTED' && (
+                <div className="query-reject">
+                  <p>驳回原因：{queryResult.reason || '未说明'}</p>
+                  <button className="btn-primary" onClick={handleNewOrder}>重新上传</button>
+                </div>
+              )}
+              {queryResult.status !== 'REJECTED' && (
+                <p className="query-hint">请凭取件码到店领取</p>
+              )}
+            </div>
+          )}
+          <button className="btn-back" onClick={() => setStep('select')}>返回</button>
         </div>
       )}
 

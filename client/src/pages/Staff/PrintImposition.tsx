@@ -39,7 +39,8 @@ const PAPERS: Paper[] = [
   { label: '5寸 (89×127)', w: 89, h: 127 },
 ];
 
-const PRINTABLE = ['READY_PRINT', 'PRINTED', 'PROCESSING', 'COMPLETED'];
+// 拼版候选：任意已上传图片的订单（含新单/待审核/已驳回等），保证页面始终有内容可选
+const HAS_IMAGE = (o: Order) => !!o.image_url || !!o.print_url;
 
 interface Props {
   onNavigate: (tab: 'orders' | 'inventory' | 'imposition') => void;
@@ -186,7 +187,7 @@ export default function PrintImposition({ onNavigate }: Props) {
     const res = await getOrders();
     if (res.ok) {
       const all = res.data as Order[];
-      setOrders(all.filter((o) => PRINTABLE.includes(o.status)));
+      setOrders(all.filter((o) => HAS_IMAGE(o)));
     }
     setLoading(false);
   }, []);
@@ -398,7 +399,7 @@ export default function PrintImposition({ onNavigate }: Props) {
 
       {/* 订单选择 */}
       <section className="imp-section">
-        <h2 className="inv-title">选择订单（{selected.size} 已选 / {orders.length} 可打印）</h2>
+        <h2 className="inv-title">选择订单（{selected.size} 已选 / {orders.length} 有图）</h2>
         {loading ? (
           <div className="list-empty">加载中...</div>
         ) : orders.length === 0 ? (

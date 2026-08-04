@@ -336,6 +336,38 @@ export async function savePrintUrl(
   return { order: await getOrderById(db, orderId) };
 }
 
+/** 驳回订单（店员选预置原因，非手填） */
+export async function rejectOrder(
+  db: D1Database,
+  orderId: string,
+  reason: string
+): Promise<{ order?: OrderRow; error?: string }> {
+  const res = await db
+    .prepare(`UPDATE orders SET status = 'REJECTED', feedback_reason = ?, updated_at = datetime('now', 'localtime') WHERE order_id = ?`)
+    .bind(reason, orderId)
+    .run();
+  if ((res.meta as { changes: number }).changes === 0) return { error: 'NOT_FOUND' };
+  return { order: await getOrderById(db, orderId) };
+}
+
+// ==================== Web Push 订阅 ====================
+export interface PushSubscription {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}
+
+export async function savePushSubscription(db: D1Database, sub: PushSubscription): Promise<void> {
+  await db
+    .prepare(`INSERT OR IGNORE INTO push_subscriptions (endpoint, p256dh, auth) VALUES (?, ?, ?)`)
+    .bind(sub.endpoint, sub.p256dh, sub.auth)
+    .run();
+}
+
+export async function getPushSubscriptions(db: D1Database): Promise<PushSubscription[]> {
+  return allRows<PushSubscription>(db.prepare('SELECT endpoint, p256dh, auth FROM push_subscriptions'));
+}
+
 /**
  * 图片内联存储（替代 R2）
  */

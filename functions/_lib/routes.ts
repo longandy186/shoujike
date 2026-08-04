@@ -8,8 +8,10 @@ import type { Env } from './types';
 import * as db from './db';
 import { putImage, getObject } from './r2';
 import { getEnabledProducts, getAllProducts, getProductBySku, getAllMaterials } from './sku';
+import { notifyNewOrder } from './notify';
+import { processWebhook } from './webhook';
 
-const VALID_STATUS = ['NEW', 'WAITING_CHECK', 'READY_PRINT', 'PRINTED', 'PROCESSING', 'COMPLETED'];
+const VALID_STATUS = ['NEW', 'WAITING_CHECK', 'READY_PRINT', 'PRINTED', 'PROCESSING', 'COMPLETED', 'REJECTED'];
 const ALLOWED_IMAGE = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const MAX_UPLOAD = 20 * 1024 * 1024;
 
@@ -46,6 +48,14 @@ export function registerRoutes(app: Hono<{ Bindings: Env }>) {
       if (!body.imageUrl) return c.json({ ok: false, error: 'MISSING_IMAGE', message: '请上传图片' }, 400);
       const r = await db.createOrder(c.env.DB, body);
       if (r.error) return c.json({ ok: false, error: 'CODE_FAILED', message: '取件码生成失败，请重试' }, 500);
+      // 来单通知（三层：Web Push / WebSocket / Telegram）
+      if (r.order) {
+        await notifyNewOrder(c.env, {
+          order_id: r.order.order_id,
+          pickup_code: r.order.pickup_code,
+          master_sku: r.order.master_sku,
+        });
+      }
       return c.json({ ok: true, data: r.order }, 201);
     } catch (e) {
       return c.json({ ok: false, error: 'CREATE_FAILED', message: msg(e) }, 500);
@@ -117,6 +127,59 @@ export function registerRoutes(app: Hono<{ Bindings: Env }>) {
       return c.json({ ok: true, data: r.order }, 201);
     } catch (e) {
       return c.json({ ok: false, error: 'UPLOAD_ERROR', message: msg(e) }, 400);
+    }
+  });
+
+  // ---------- 驳回（反馈闭环） ----------
+  app.patch('/api/orders/:orderId/reject', async (c) => {
+    try {
+      const body = await c.req.json<{ reason?: string }>();
+      if (!body.reason) return c.json({ ok: false, error: 'MISSING_REASON', message: '请选择驳回原因' }, 400);
+      const r = await db.rejectOrder(c.env.DB, c.req.param('orderId'), body.reason);
+      if (r.error === 'NOT_FOUND') return c.json({ ok: false, error: 'NOT_FOUND', message: '订单不存在' }, 404);
+      return c.json({ ok: true, data: r.order });
+    } catch (e) {
+      return c.json({ ok: false, error: 'REJECT_FAILED', message: msg(e) }, 500);
+    }
+  });
+
+  // ---------- Web Push 订阅 / VAPID 公钥 ----------
+  app.get('/api/vapid-public-key', (c) =>
+    c.json({ ok: true, data: { publicKey: c.env.VAPID_PUBLIC_KEY ?? '' } })
+  );
+
+  app.post('/api/push/subscribe', async (c) => {
+    try {
+      const body = await c.req.json<{ endpoint?: string; keys?: { p256dh?: string; auth?: string } }>();
+      if (!body.endpoint || !body.keys?.p256dh || !body.keys?.auth) {
+        return c.json({ ok: false, error: 'BAD_SUB', message: '订阅信息不完整' }, 400);
+      }
+      await db.savePushSubscription(c.env.DB, {
+        endpoint: body.endpoint,
+        p256dh: body.keys.p256dh,
+        auth: body.keys.auth,
+      });
+      return c.json({ ok: true });
+    } catch (e) {
+      return c.json({ ok: false, error: 'SUB_FAILED', message: msg(e) }, 500);
+    }
+  });
+
+  // ---------- 外部电商 Webhook（零轮询） ----------
+  app.post('/api/webhook/:channel', async (c) => {
+    try {
+      const channel = c.req.param('channel');
+      const raw = await c.req.text();
+      const headers: Record<string, string | undefined> = {
+        'x-shopify-hmac-sha256': c.req.header('x-shopify-hmac-sha256'),
+        'x-etsy-signature': c.req.header('x-etsy-signature'),
+      };
+      const u = new URL(c.req.url);
+      headers['x-tiktok-sign'] = u.searchParams.get('sign') ?? undefined;
+      const r = await processWebhook(channel, raw, headers, c.env);
+      return c.json({ ok: r.ok, error: r.error }, r.status);
+    } catch (e) {
+      return c.json({ ok: false, error: 'WEBHOOK_ERROR', message: msg(e) }, 500);
     }
   });
 

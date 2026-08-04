@@ -17,3 +17,7 @@ migrations_dir = "migrations"
 [[r2_buckets]]
 binding = "BUCKET"
 bucket_name = "ai-cc-prod-images-5f5df686"
+
+# 注：原 Durable Object（店员端 WebSocket 站内实时响铃）因部署令牌无 Worker 编辑权限，
+# 暂未上线。站内实时响铃改为由 Web Push 层驱动（Service Worker postMessage 唤醒页面）。
+# DO 绑定与 worker/ 目录保留，待令牌具备 Worker 权限后再启用。

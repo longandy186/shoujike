@@ -121,6 +121,42 @@ export async function updateOrderStatus(orderId: string, status: string) {
   });
 }
 
+/** 驳回订单（店员选预置原因） */
+export async function rejectOrder(orderId: string, reason: string) {
+  return request(`/orders/${orderId}/reject`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+/** 凭取件码查询订单 */
+export async function getOrderByCode(code: string) {
+  return request(`/orders/code/${code}`);
+}
+
+/** Web Push 订阅 */
+export async function subscribePush(sub: { endpoint: string; keys: { p256dh: string; auth: string } }) {
+  return request('/push/subscribe', {
+    method: 'POST',
+    body: JSON.stringify(sub),
+  });
+}
+
+/** 获取 VAPID 公钥 */
+export async function getVapidPublicKey() {
+  return request('/vapid-public-key');
+}
+
+/** 预置驳回原因（店员下拉，非手填） */
+export const REJECT_REASONS = [
+  '照片模糊',
+  '亮度不足或曝光',
+  '比例或尺寸不符',
+  '非人像或内容不符',
+  '背景杂乱',
+  '其他',
+] as const;
+
 /** 库存总览（物料 + 可生产数量 + 预警） */
 export async function getInventorySummary() {
   return request('/inventory/summary');
@@ -223,4 +259,8 @@ export default {
   uploadImage,
   createOrder,
   getOrder,
+  rejectOrder,
+  getOrderByCode,
+  subscribePush,
+  getVapidPublicKey,
 };

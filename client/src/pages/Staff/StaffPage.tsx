@@ -7,7 +7,8 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ImageEditor, { type CropData, type ImageEditorHandle } from '../../components/ImageEditor';
-import { getOrder, getOrders, saveCrop, updateOrderStatus, uploadPrint } from '../../api';
+import { getOrder, getOrders, saveCrop, updateOrderStatus, uploadPrint, rejectOrder, REJECT_REASONS } from '../../api';
+import { initStaffRealtime } from '../../staffRealtime';
 import { getProductById } from '../Guest/products';
 import InventoryView from './InventoryView';
 import PrintImposition from './PrintImposition';
@@ -35,6 +36,7 @@ const STATUS_LABEL: Record<string, string> = {
   PRINTED: '已打印',
   PROCESSING: '制作中',
   COMPLETED: '已完成',
+  REJECTED: '已驳回',
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -44,6 +46,7 @@ const STATUS_COLOR: Record<string, string> = {
   PRINTED: '#8b949e',
   PROCESSING: '#bc8cff',
   COMPLETED: '#8b949e',
+  REJECTED: '#f85149',
 };
 
 export default function StaffPage() {
@@ -73,6 +76,12 @@ export default function StaffPage() {
   const [currentCrop, setCurrentCrop] = useState<CropData | null>(null);
   const editorRef = useRef<ImageEditorHandle>(null);
 
+  // 来单 Toast + 实时响铃
+  const [toast, setToast] = useState<string | null>(null);
+  // 驳回
+  const [showReject, setShowReject] = useState(false);
+  const [rejectReason, setRejectReason] = useState<string>('');
+
   // 加载订单列表
   const loadOrders = useCallback(async () => {
     setListLoading(true);
@@ -96,6 +105,14 @@ export default function StaffPage() {
     }
   }, []);
   useEffect(() => { loadAlerts(); }, [loadAlerts]);
+
+  // 初始化店员端实时（Web Push + WebSocket 站内响铃）
+  useEffect(() => {
+    initStaffRealtime((code) => {
+      setToast(`🔔 新订单 #${code}`);
+      setTimeout(() => setToast(null), 6000);
+    });
+  }, []);
 
   // 按筛选过滤
   const filteredOrders = useMemo(() => {
@@ -194,6 +211,49 @@ export default function StaffPage() {
     }
   };
 
+  // 驳回（店员选预置原因，非手填）
+  const handleReject = async () => {
+    if (!editingOrder || !rejectReason) return;
+    const res = await rejectOrder(editingOrder.order_id, rejectReason);
+    if (res.ok) {
+      setEditingOrder(res.data as Order);
+      setShowReject(false);
+      setRejectReason('');
+      loadOrders();
+    } else {
+      setLookupError(res.error || '驳回失败');
+    }
+  };
+
+  // 单图打印（弹系统打印机，与拼版页一致）
+  const handlePrint = () => {
+    if (!editingOrder?.print_url) return;
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.src = editingOrder.print_url;
+    iframe.onload = () => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch {
+        /* ignore */
+      }
+    };
+    document.body.appendChild(iframe);
+    setTimeout(() => {
+      try {
+        document.body.removeChild(iframe);
+      } catch {
+        /* ignore */
+      }
+    }, 60000);
+  };
+
   // ==================== 非订单标签页 ====================
   if (tab === 'inventory') return <InventoryView onNavigate={setTab} />;
   if (tab === 'imposition') return <PrintImposition onNavigate={setTab} />;
@@ -210,6 +270,7 @@ export default function StaffPage() {
             )}
           </h1>
         </header>
+        {toast && <div className="new-order-toast">{toast}</div>}
 
         <div className="staff-section">
           <ImageEditor
@@ -233,6 +294,30 @@ export default function StaffPage() {
               <button className="btn-print-out" onClick={() => window.open(editingOrder!.print_url, '_blank')}>
                 📄 查看打印图
               </button>
+            )}
+
+            {editingOrder.print_url && (
+              <button className="btn-print-out" onClick={handlePrint}>
+                🖨️ 打印
+              </button>
+            )}
+
+            <button className="btn-reject" onClick={() => { setShowReject((v) => !v); setRejectReason(''); }}>
+              ⛔ 驳回
+            </button>
+            {showReject && (
+              <div className="reject-panel">
+                <select value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}>
+                  <option value="">选择驳回原因…</option>
+                  {REJECT_REASONS.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+                <button className="btn-reject-confirm" disabled={!rejectReason} onClick={handleReject}>
+                  确认驳回
+                </button>
+                <button className="btn-reject-cancel" onClick={() => setShowReject(false)}>取消</button>
+              </div>
             )}
 
             <div className="status-actions">
@@ -274,6 +359,7 @@ export default function StaffPage() {
         <h1>店员后台</h1>
         <p>文创生产管理系统</p>
       </header>
+      {toast && <div className="new-order-toast">{toast}</div>}
 
       <nav className="inv-tabbar inv-tabbar-top">
         <button onClick={() => setTab('orders')} className="active">📋 订单</button>

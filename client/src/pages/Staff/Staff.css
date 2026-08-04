@@ -146,3 +146,16 @@
   .imp-page { box-shadow: none; max-width: none; page-break-after: always; }
   .imp-page:last-child { page-break-after: auto; }
 }
+
+/* 驳回面板 */
+.btn-reject { padding: 0.5rem 0.9rem; border-radius: 8px; border: 1px solid #f85149; background: transparent; color: #f85149; cursor: pointer; font-size: 0.85rem; }
+.btn-reject:hover { background: #f8514911; }
+.reject-panel { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; width: 100%; margin-top: 0.4rem; padding: 0.6rem; background: #161b22; border: 1px solid #f8514955; border-radius: 8px; }
+.reject-panel select { flex: 1; min-width: 140px; padding: 0.45rem; border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: #e0e0e0; }
+.btn-reject-confirm { padding: 0.45rem 0.8rem; border-radius: 6px; border: none; background: #f85149; color: #fff; cursor: pointer; }
+.btn-reject-confirm:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-reject-cancel { padding: 0.45rem 0.8rem; border-radius: 6px; border: 1px solid #30363d; background: transparent; color: #8b949e; cursor: pointer; }
+
+/* 来单 Toast */
+.new-order-toast { position: sticky; top: 0; z-index: 50; margin: 0.5rem 1rem; padding: 0.7rem 1rem; border-radius: 8px; background: #1f6feb; color: #fff; font-weight: 700; text-align: center; box-shadow: 0 4px 16px rgba(31,111,235,0.5); animation: toast-in 0.25s ease; }
+@keyframes toast-in { from { transform: translateY(-12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }

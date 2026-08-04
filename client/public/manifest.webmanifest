@@ -1,0 +1,10 @@
+{
+  "name": "AI文创生产系统",
+  "short_name": "AI文创",
+  "description": "AI文创柔性定制生产系统",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117"
+}

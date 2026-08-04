@@ -1,0 +1,12 @@
+# 通知用 Durable Object 宿主 Worker（Pages 通过 script_name 绑定）
+name = "ai-cc-prod-notifier"
+main = "src/index.ts"
+compatibility_date = "2025-08-01"
+
+[[durable_objects.bindings]]
+name = "Notifier"
+class_name = "OrderNotifier"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["OrderNotifier"]
