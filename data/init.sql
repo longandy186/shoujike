@@ -80,6 +80,24 @@ CREATE TABLE IF NOT EXISTS inventory_alerts (
 CREATE INDEX IF NOT EXISTS idx_inventory_alerts_material ON inventory_alerts(material_id);
 
 -- ============================================================
+-- inventory_transactions 表 — 库存流水（Phase 1.5 统计/入库/出库）
+-- type: IN（入库）/ OUT（出库扣减）/ ADJUST（调整）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS inventory_transactions (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  material_id   TEXT NOT NULL,
+  material_name TEXT DEFAULT '',
+  type          TEXT NOT NULL,
+  qty           INTEGER NOT NULL,
+  ref           TEXT DEFAULT '',
+  note          TEXT DEFAULT '',
+  created_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_inv_tx_material ON inventory_transactions(material_id);
+CREATE INDEX IF NOT EXISTS idx_inv_tx_type    ON inventory_transactions(type);
+
+-- ============================================================
 -- 物料种子数据（初始库存 100，安全库存 20）
 -- 注意：重复执行时用 INSERT OR IGNORE 保留已有库存，不会覆盖。
 -- ============================================================
@@ -88,3 +106,13 @@ INSERT OR IGNORE INTO materials (material_id, name, category, unit, current_stoc
   ('KEY_RING',    '钥匙圈',       '五金',   'pcs', 100, 20),
   ('FRAME_001',   '相框基座',     '相框',   'pcs', 100, 20),
   ('MAGNET_001',  '磁贴背板',     '磁贴',   'pcs', 100, 20);
+
+-- 新物料补写初始 IN 流水（初始库存），便于库存统计/入库历史
+-- 通过 NOT EXISTS 确保仅对尚未有流水的物料写入，可重复执行
+INSERT INTO inventory_transactions (material_id, material_name, type, qty, ref, note)
+SELECT material_id, name, 'IN', current_stock, 'seed', '初始库存'
+FROM materials
+WHERE current_stock > 0
+  AND NOT EXISTS (
+    SELECT 1 FROM inventory_transactions t WHERE t.material_id = materials.material_id
+  );

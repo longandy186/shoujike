@@ -180,27 +180,33 @@ NEW → WAITING_CHECK → READY_PRINT → PRINTED → PROCESSING → COMPLETED
   - [x] Task 5: 店员后台（订单列表 + 取件码查询 + 状态筛选 Tab + 产品名显示）
   - [x] Task 6: 打印流程（前端导出高清打印图 → 上传后端保存 print_url → 查看）
 - [x] Phase 1.5 — 产品主数据系统（Master SKU）
-  - [x] 独立迁移脚本 `data/init.sql`（与 init.ts 字段一致，含物料种子）
+  - [x] 独立迁移脚本 `data/init.sql`（与 init.ts 字段一致，含物料种子 + 初始入库流水）
   - [x] `sku.template.json` 主数据配置（physicalSize / printArea / dpi / bleed / mirror / template / paper / bom）
   - [x] `sku.service.ts` 读取模板；前端产品改为由 `/api/skus` 驱动（带静态兜底）
   - [x] `materials` 物料表 + 初始库存 100 / 安全库存 20
   - [x] `bom.service.ts`（inventory.service）+ `bom_consumption_log` 扣减流水
   - [x] 订单置 `COMPLETED` 时触发 BOM 扣减（幂等），低于安全库存写 `inventory_alerts` 预警
-  - [x] 新增接口：`GET /api/skus`（启用产品）、`/api/skus/:sku`、`/api/materials`（库存列表）
+  - [x] `inventory_transactions` 库存流水表（IN 入库 / OUT 出库扣减 / ADJUST 调整），支持「已使用数量」统计
+  - [x] 新增接口：`GET /api/skus`、`/api/skus/:sku`、`/api/materials`、`GET /api/inventory/summary`（物料+可生产数量+预警）、`GET /api/inventory/alerts`、`POST /api/inventory/stock-in`（采购入库）
+  - [x] **库存 / 预警 UI（店员后台「库存」Tab）**：物料库存卡片（当前/已使用/安全库存/状态）、各产品可生产数量、低库存预警横幅、采购入库表单
+- [x] Task 6 升级 — 真实拼版打印（店员后台「拼版」Tab）
+  - [x] 勾选多个可打印订单（READY_PRINT/PRINTED/...），按各自 SKU 物理尺寸在打印纸张上自动排版
+  - [x] 支持纸张（A4/A5/6寸/5寸）、DPI（72/150/300）、边距/间距参数
+  - [x] 原生 Canvas 拼版（cover 裁切 + 取件码标注），`@media print` 仅输出拼版纸张，浏览器直接打印
+  - [x] 不引入 Sharp/PDFKit（属 Phase 3 技术示范，暂不开发），保持 MVP 原生 Canvas 方案
+- [x] 部署（阶段 1 本地生产运行 + 阶段 3 Cloudflare 架构说明）
 
 ### Phase 1.5 说明（Master SKU 与 BOM）
 - **产品主数据**：所有产品定义集中在 `server/src/config/sku.template.json`，加新品 = 加一条 product，不改代码；`bom` 数组声明所需物料及数量。
 - **物料库存**：`materials` 表初始 4 种物料各 100，安全线 20；`init.ts` 种子与 `data/init.sql` 保持一致。
-- **BOM 扣减**：店员将订单状态改为 `COMPLETED` 时，后端按该 SKU 的 `bom` 逐项扣减并写 `bom_consumption_log`；已扣减订单再次完成会被幂等跳过；扣减后跌破安全线自动生成 `inventory_alerts` 预警记录。
+- **BOM 扣减**：店员将订单状态改为 `COMPLETED` 时，后端按该 SKU 的 `bom` 逐项扣减并写 `bom_consumption_log`（同时写 `inventory_transactions` 的 OUT 流水）；已扣减订单再次完成会被幂等跳过；扣减后跌破安全线自动生成 `inventory_alerts` 预警记录。
+- **库存统计**：`inventory_transactions` 记录所有 IN/OUT 流水，「已使用数量」= 历史 OUT 之和；采购入库走 `POST /api/inventory/stock-in`，写 IN 流水并增加 `current_stock`。
 - **前端驱动**：游客端产品列表改由 `GET /api/skus` 拉取（后端不可用时回退到 `products.ts` 静态兜底），店员端产品名映射仍走同一来源。
-- **范围边界**：本阶段只做后台数据层，无库存 UI；后端 Sharp 300DPI 出图、Fabric.js 重构属 Phase 3 / 后期，未做。
+- **范围边界**：后端 Sharp 300DPI 出图、PDFKit 自动拼版、Fabric.js 重构属 Phase 3 / 后期，未做；拼版打印当前用前端原生 Canvas 实现。
 
-### 打印流程说明（Task 6）
-- 店员在编辑页调整好裁剪后，点击「生成打印图」
-- 前端 `ImageEditor` 通过 `forwardRef` 暴露 `exportPrintImage(scale=3)`，在离屏 Canvas 按 3 倍分辨率渲染（约 1080px），输出 PNG dataURL
-- 通过 `POST /api/orders/:orderId/print`（multipart）上传，后端存入 `uploads/` 并写入订单 `print_url`
-- 生成后可点击「查看打印图」在新标签打开，人工打印
-- 设计取舍：未引入 `canvas` 原生依赖（Windows 无 VS 编译环境 + 沙箱安全钩子拦截安装），改在前端浏览器 Canvas 完成渲染，更轻量且无需后端图形库
+### 打印流程说明（Task 6 + 拼版）
+- **单张打印图**：店员在编辑页调整好裁剪后，点击「生成打印图」→ 前端 `ImageEditor` 通过 `forwardRef` 暴露 `exportPrintImage(scale=3)`，在离屏 Canvas 按 3 倍分辨率渲染（约 1080px），输出 PNG dataURL → `POST /api/orders/:orderId/print` 上传，后端存入 `uploads/` 并写入订单 `print_url`。生成后可点击「查看打印图」在新标签打开人工打印。
+- **批量拼版打印**：店员切到「拼版」Tab → 勾选多个可打印订单 → 设置纸张/DPI/边距/间距 → 「生成拼版」按各自 SKU 物理尺寸在纸张上自动排版（cover 裁切 + 取件码标注）→「打印」触发浏览器打印（`@media print` 只输出拼版纸张）。设计取舍：未引入 `canvas` 依赖（Windows 无 VS 编译环境 + 沙箱安全钩子拦截安装），改在前端浏览器 Canvas 完成渲染。
 
 ## MVP 禁止开发内容
 
@@ -209,3 +215,47 @@ NEW → WAITING_CHECK → READY_PRINT → PRINTED → PROCESSING → COMPLETED
 - ❌ 电商平台 API (Shopify / Etsy / TikTok)
 - ❌ 复杂权限系统
 - ❌ Electron 桌面程序
+
+## 部署
+
+按路线指南，部署分三阶段。当前已实现**阶段 1 本地生产运行**，阶段 3 Cloudflare 仅提供架构说明（需账号与凭证，不在本仓库直接交付）。
+
+### 阶段 1：本地 / 局域网生产运行
+
+前后端同源部署：生产模式下 Express 直接托管前端构建产物（`client/dist`），无需单独起 Vite。
+
+```bash
+# 1. 安装依赖（首次）
+npm run install:all
+
+# 2. 构建前后端
+npm run build            # = build:server (tsc) + build:client (tsc --noEmit && vite build)
+
+# 3. 启动生产服务（NODE_ENV=production，Express 托管 dist + 提供 /api）
+npm run start:prod       # = cd server && NODE_ENV=production node dist/index.js
+```
+
+- 访问：`http://localhost:3001`（游客与店员后台同源；店员后台 `#/staff`）
+- 数据库：默认 `server/storage/prod.db`（SQLite），首次启动自动建表 + 物料种子
+- 上传目录：默认 `uploads/`，生产环境同样由 Express 托管
+- 重置数据：删除 `server/storage/prod.db`，重启即重新初始化（物料回到初始 100 / 安全 20）
+- 自定义：可用环境变量 `PORT` / `DB_PATH` / `UPLOAD_PATH` 覆盖默认
+
+> 说明：生产构建会清空并重建 `client/dist`。部分受限环境（如沙箱）的回收站/删除钩子会拦截 `dist` 清理，此时可在正常开发机上执行 `npm run build`，或构建到临时目录后拷贝产物。
+
+### 阶段 3：Cloudflare 部署（架构说明，需凭证）
+
+```
+Cloudflare Pages  →  静态前端（client/dist）
+Cloudflare Workers API  →  后端 API（需改造为 Workers 兼容，或自托管 Node 服务）
+Cloudflare D1 / 外部 SQLite  →  数据库（当前用 better-sqlite3，需替换为 D1 或托管数据库）
+Cloudflare R2  →  图片存储（当前 uploads/ 本地目录，需替换为 R2）
+```
+
+迁移到 Cloudflare 时需解决：① `better-sqlite3` 是原生模块，Workers 不支持，需改用 D1；② 图片上传需改用 R2；③ `sku.template.json` 主数据可保留（Workers 可读 KV/绑定）。本阶段不在当前 MVP 范围内，仅作路线预留。
+
+### 当前阶段 1 验证
+
+- 后端 `tsc --noEmit` 类型检查通过
+- 前端 `tsc --noEmit` + `vite build` 构建通过（36 模块）
+- `NODE_ENV=production node dist/index.js` 启动后：`GET /` 返回 200 HTML（SPA），未知路由 SPA 回退，`/api/*` 正常响应

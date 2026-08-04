@@ -43,3 +43,93 @@
 .btn-status:hover { border-color: #e94560; }
 .btn-ready { border-color: #3fb95055; color: #3fb950; }
 .btn-back { display: block; width: 100%; margin-top: 1rem; padding: 0.5rem; background: transparent; border: 1px solid #30363d; border-radius: 8px; color: #8b949e; cursor: pointer; }
+
+/* ============================================================
+   标签栏（订单 / 库存 / 拼版）
+   ============================================================ */
+.inv-tabbar { display: flex; gap: 0.4rem; padding: 0.6rem 1rem; background: #0d1117; border-top: 1px solid #21262d; position: sticky; bottom: 0; }
+.inv-tabbar-top { position: static; border-top: none; border-bottom: 1px solid #21262d; }
+.inv-tabbar button { flex: 1; padding: 0.6rem 0.2rem; border: 1px solid #30363d; border-radius: 8px; background: transparent; color: #8b949e; cursor: pointer; font-size: 0.85rem; }
+.inv-tabbar button.active { border-color: #e94560; color: #e94560; background: #e9456011; }
+
+.staff-page-inner { min-height: 100vh; background: #0d1117; color: #e0e0e0; padding-bottom: 4rem; }
+.inv-header { display: flex; align-items: center; gap: 0.6rem; padding: 0.9rem 1rem; background: #161b22; border-bottom: 1px solid #21262d; position: sticky; top: 0; }
+.inv-header h1 { flex: 1; text-align: center; font-size: 1.1rem; color: #e94560; margin: 0; }
+.inv-back { background: none; border: 1px solid #30363d; color: #8b949e; padding: 0.4rem 0.7rem; border-radius: 8px; cursor: pointer; font-size: 0.8rem; }
+.inv-refresh { background: none; border: 1px solid #30363d; color: #8b949e; padding: 0.4rem 0.6rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem; }
+
+.inv-alert-banner { margin: 0.8rem 1rem; padding: 0.6rem 0.8rem; background: #e9456018; border: 1px solid #e9456055; border-radius: 8px; color: #e94560; font-size: 0.8rem; line-height: 1.6; }
+.inv-alert-chip { display: inline-block; margin: 0 0.3rem; padding: 0.1rem 0.4rem; background: #e9456022; border-radius: 4px; }
+
+.inv-section { padding: 0.8rem 1rem; }
+.inv-title { font-size: 0.95rem; margin: 0.4rem 0 0.7rem; color: #e0e0e0; }
+
+/* 可生产数量 */
+.inv-prod-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
+.inv-prod-card { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 0.8rem; text-align: center; }
+.inv-prod-name { font-size: 0.8rem; opacity: 0.8; }
+.inv-prod-num { font-size: 1.8rem; font-weight: 700; color: #3fb950; line-height: 1.1; }
+.inv-prod-label { font-size: 0.7rem; opacity: 0.5; margin-bottom: 0.5rem; }
+.inv-prod-bom { display: flex; flex-wrap: wrap; gap: 0.3rem; justify-content: center; }
+.inv-bom-tag { font-size: 0.65rem; padding: 0.15rem 0.4rem; border-radius: 4px; background: #21262d; color: #8b949e; }
+.inv-bom-tag.lack { background: #e9456022; color: #e94560; }
+
+/* 物料库存 */
+.inv-mat-list { display: flex; flex-direction: column; gap: 0.6rem; }
+.inv-mat-row { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 0.7rem 0.85rem; }
+.inv-mat-row.low { border-color: #e9456055; }
+.inv-mat-main { display: flex; justify-content: space-between; align-items: baseline; }
+.inv-mat-name { font-size: 0.95rem; font-weight: 600; }
+.inv-mat-id { font-size: 0.7rem; opacity: 0.4; font-family: monospace; }
+.inv-mat-stock { display: flex; align-items: baseline; gap: 0.4rem; margin: 0.35rem 0 0.3rem; }
+.inv-mat-cur { font-size: 1.4rem; font-weight: 700; color: #58a6ff; }
+.inv-mat-row.low .inv-mat-cur { color: #e94560; }
+.inv-mat-unit { font-size: 0.7rem; opacity: 0.6; }
+.inv-mat-safe { font-size: 0.72rem; opacity: 0.5; margin-left: auto; }
+.inv-mat-bar { height: 6px; background: #21262d; border-radius: 3px; overflow: hidden; }
+.inv-mat-bar-fill { height: 100%; background: #3fb950; }
+.inv-mat-bar-fill.low { background: #e94560; }
+.inv-mat-used { font-size: 0.7rem; opacity: 0.45; margin-top: 0.3rem; }
+
+/* 采购入库 */
+.inv-stockin { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.inv-stockin select, .inv-stockin input { padding: 0.6rem; border-radius: 8px; border: 1px solid #30363d; background: #0d1117; color: #e0e0e0; font-size: 0.9rem; }
+.inv-stockin input[type="number"] { width: 80px; }
+.inv-stockin input[type="text"] { flex: 1; min-width: 120px; }
+.btn-stockin { padding: 0.6rem 1rem; border: none; border-radius: 8px; background: #238636; color: #fff; font-weight: 600; cursor: pointer; }
+.btn-stockin:disabled { opacity: 0.5; }
+.inv-msg-ok { margin-top: 0.6rem; padding: 0.5rem; border-radius: 6px; background: #23863622; color: #3fb950; font-size: 0.82rem; }
+.inv-msg-err { margin-top: 0.6rem; padding: 0.5rem; border-radius: 6px; background: #e9456022; color: #e94560; font-size: 0.82rem; }
+
+/* ============================================================
+   拼版打印
+   ============================================================ */
+.imp-settings { display: flex; flex-wrap: wrap; gap: 0.6rem; padding: 0.8rem 1rem; background: #161b22; }
+.imp-settings label { display: flex; flex-direction: column; font-size: 0.7rem; opacity: 0.7; gap: 0.25rem; }
+.imp-settings select, .imp-settings input { padding: 0.45rem; border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: #e0e0e0; font-size: 0.85rem; }
+.imp-settings input[type="number"] { width: 70px; }
+.imp-section { padding: 0.8rem 1rem; }
+.imp-order-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.imp-chip { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.6rem; background: #161b22; border: 1px solid #21262d; border-radius: 8px; font-size: 0.78rem; cursor: pointer; }
+.imp-chip.on { border-color: #e94560; background: #e9456011; }
+.imp-chip-code { font-family: monospace; font-weight: 700; color: #e94560; }
+.imp-chip-sku { opacity: 0.7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imp-chip-warn { font-size: 0.6rem; background: #d2992222; color: #d29922; padding: 0.1rem 0.3rem; border-radius: 4px; }
+.imp-actions { display: flex; gap: 0.6rem; padding: 0.5rem 1rem; }
+.btn-impose { flex: 1; padding: 0.75rem; border: none; border-radius: 8px; background: #bc8cff; color: #fff; font-weight: 600; cursor: pointer; font-size: 0.95rem; }
+.btn-impose:disabled { opacity: 0.5; }
+.btn-print-sheet { flex: 1; padding: 0.75rem; border: none; border-radius: 8px; background: #e94560; color: #fff; font-weight: 600; cursor: pointer; font-size: 0.95rem; }
+.btn-print-sheet:disabled { opacity: 0.5; }
+.imp-result { margin: 0 1rem; padding: 0.5rem 0.7rem; border-radius: 6px; font-size: 0.82rem; }
+.imp-result.ok { background: #23863622; color: #3fb950; }
+.imp-result.warn { background: #e9456022; color: #e94560; }
+.print-sheet-wrap { padding: 1rem; display: flex; justify-content: center; overflow: auto; }
+.print-sheet { background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,0.5); max-width: 100%; }
+
+/* 打印时只输出拼版纸张 */
+@media print {
+  body * { visibility: hidden !important; }
+  .print-sheet-wrap, .print-sheet-wrap * { visibility: visible !important; }
+  .print-sheet-wrap { position: absolute; left: 0; top: 0; padding: 0; }
+  .print-sheet { box-shadow: none; max-width: none; }
+}

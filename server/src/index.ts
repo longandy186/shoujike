@@ -6,6 +6,7 @@ import uploadRoutes from './routes/upload';
 import orderRoutes from './routes/orders';
 import printRoutes from './routes/print';
 import skuRoutes from './routes/sku';
+import inventoryRoutes from './routes/inventory';
 
 // ============================================================
 // 环境变量加载（tsx 不原生支持 .env，使用手动读取）
@@ -60,6 +61,16 @@ if (process.env.NODE_ENV !== 'production') {
 // 静态文件服务 — 上传的图片
 app.use('/uploads', express.static(path.resolve(__dirname, '..', UPLOAD_PATH)));
 
+// 生产模式：托管前端构建产物（client/dist），实现前后端同源部署
+if (process.env.NODE_ENV === 'production') {
+  const clientDist = path.resolve(__dirname, '..', '..', 'client', 'dist');
+  app.use(express.static(clientDist));
+  // SPA 回退：非 /api 请求都返回 index.html
+  app.get(/^\/(?!api|uploads).*/, (_req, res) => {
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+}
+
 // -------------------- 路由 --------------------
 // 健康检查（供前端连接测试）
 app.get('/api/health', (_req, res) => {
@@ -81,6 +92,7 @@ app.use('/api', uploadRoutes);
 app.use('/api', orderRoutes);
 app.use('/api', printRoutes);
 app.use('/api', skuRoutes);
+app.use('/api', inventoryRoutes);
 
 // -------------------- 404 处理 --------------------
 app.use((_req, res) => {

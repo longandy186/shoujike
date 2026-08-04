@@ -187,8 +187,29 @@ export function initDatabase(): void {
   `);
 
   // ============================================================
+  // inventory_transactions 表 — 库存流水（Phase 1.5 统计/入库/出库）
+  // type: IN（入库）/ OUT（出库扣减）/ ADJUST（调整）
+  // ============================================================
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS inventory_transactions (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      material_id   TEXT NOT NULL,
+      material_name TEXT DEFAULT '',
+      type          TEXT NOT NULL,
+      qty           INTEGER NOT NULL,
+      ref           TEXT DEFAULT '',
+      note          TEXT DEFAULT '',
+      created_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_inv_tx_material ON inventory_transactions(material_id);
+    CREATE INDEX IF NOT EXISTS idx_inv_tx_type    ON inventory_transactions(type);
+  `);
+
+  // ============================================================
   // 物料种子数据（幂等：仅 INSERT 不存在的物料，保留已有库存）
   // 初始库存 100、安全库存 20，与 data/init.sql 保持一致
+  // 新物料额外写一条 IN 流水（初始库存），便于库存统计/入库历史
   // ============================================================
   const seedMaterials = loadSkuMaterials();
   if (seedMaterials.length > 0) {
@@ -196,9 +217,17 @@ export function initDatabase(): void {
       INSERT OR IGNORE INTO materials (material_id, name, category, unit, current_stock, safety_stock)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
+    const txStmt = db.prepare(`
+      INSERT INTO inventory_transactions (material_id, material_name, type, qty, ref, note)
+      VALUES (?, ?, 'IN', ?, 'seed', '初始库存')
+    `);
     const seed = db.transaction(() => {
       for (const m of seedMaterials) {
-        stmt.run(m.materialId, m.name, m.category, m.unit, MATERIAL_INITIAL_STOCK, m.safetyStock || MATERIAL_SAFETY_STOCK);
+        const info = stmt.run(m.materialId, m.name, m.category, m.unit, MATERIAL_INITIAL_STOCK, m.safetyStock || MATERIAL_SAFETY_STOCK);
+        // changes === 1 表示是新插入的物料，才补写初始 IN 流水（避免重复统计）
+        if (info.changes === 1) {
+          txStmt.run(m.materialId, m.name, MATERIAL_INITIAL_STOCK);
+        }
       }
     });
     seed();

@@ -3,6 +3,8 @@ node_modules/
 
 # Build output
 dist/
+dist-validate/
+dist-old/
 build/
 
 # Environment files (keep .env.example, ignore actual .env)
@@ -48,3 +50,9 @@ npm-debug.log*
 
 # TypeScript
 *.tsbuildinfo
+
+# Local test databases (server runtime)
+server/*.db
+server/*.db-*
+server/*.db-wal
+server/*.db-shm

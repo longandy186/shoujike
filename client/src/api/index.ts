@@ -120,6 +120,24 @@ export async function updateOrderStatus(orderId: string, status: string) {
   });
 }
 
+/** 库存总览（物料 + 可生产数量 + 预警） */
+export async function getInventorySummary() {
+  return request('/inventory/summary');
+}
+
+/** 低库存预警 */
+export async function getInventoryAlerts() {
+  return request('/inventory/alerts');
+}
+
+/** 采购入库 */
+export async function stockIn(materialId: string, qty: number, note?: string) {
+  return request('/inventory/stock-in', {
+    method: 'POST',
+    body: JSON.stringify({ materialId, qty, note }),
+  });
+}
+
 /** 上传高清打印图（dataURL → 文件） */
 export async function uploadPrint(orderId: string, dataUrl: string) {
   // 将 dataURL 转为 blob 再上传

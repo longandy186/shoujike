@@ -9,6 +9,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ImageEditor, { type CropData, type ImageEditorHandle } from '../../components/ImageEditor';
 import { getOrder, getOrders, saveCrop, updateOrderStatus, uploadPrint } from '../../api';
 import { getProductById } from '../Guest/products';
+import InventoryView from './InventoryView';
+import PrintImposition from './PrintImposition';
 import './Staff.css';
 
 interface Order {
@@ -45,6 +47,7 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export default function StaffPage() {
+  const [tab, setTab] = useState<'orders' | 'inventory' | 'imposition'>('orders');
   const [view, setView] = useState<View>('list');
 
   // 订单列表
@@ -175,6 +178,10 @@ export default function StaffPage() {
     }
   };
 
+  // ==================== 非订单标签页 ====================
+  if (tab === 'inventory') return <InventoryView onNavigate={setTab} />;
+  if (tab === 'imposition') return <PrintImposition onNavigate={setTab} />;
+
   // ==================== 编辑视图 ====================
   if (view === 'edit' && editingOrder) {
     return (
@@ -251,6 +258,12 @@ export default function StaffPage() {
         <h1>店员后台</h1>
         <p>文创生产管理系统</p>
       </header>
+
+      <nav className="inv-tabbar inv-tabbar-top">
+        <button onClick={() => setTab('orders')} className="active">📋 订单</button>
+        <button onClick={() => setTab('inventory')}>📦 库存</button>
+        <button onClick={() => setTab('imposition')}>🖨️ 拼版</button>
+      </nav>
 
       <div className="staff-section">
         <div className="lookup-bar">

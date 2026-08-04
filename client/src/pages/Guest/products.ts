@@ -25,6 +25,8 @@ export interface Product {
   icon: string;
   /** 是否可用 */
   enabled: boolean;
+  /** 物理尺寸（拼版打印用，mm） */
+  physicalSize?: { width: number; height: number; unit: string };
 }
 
 /**
@@ -73,6 +75,7 @@ export async function fetchProducts(force = false): Promise<Product[]> {
         description: String(p.description ?? ''),
         icon: String(p.icon ?? '📦'),
         enabled: Boolean(p.enabled ?? true),
+        physicalSize: p.physicalSize as { width: number; height: number; unit: string } | undefined,
       }));
       // 后端可能返回全部（含禁用），这里只取启用；若后端已过滤则全部保留
       const enabled = mapped.filter((p) => p.enabled);
