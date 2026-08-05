@@ -1,0 +1,71 @@
+name: Deploy to Cloudflare Pages
+
+# push 到 master 即自动构建并部署到生产环境 https://ai-cc-prod.pages.dev
+# 也可在 GitHub Actions 页面手动触发（Run workflow）
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+  workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: '同时对远程 D1 执行未应用的迁移（migrations/）'
+        type: boolean
+        default: false
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install client dependencies
+        working-directory: client
+        run: npm ci
+
+      # client/package.json 的 build = tsc --noEmit && vite build
+      # 类型检查不过会直接让本次部署失败，避免坏版本上线
+      - name: Build client
+        working-directory: client
+        run: npm run build
+
+      # 可选：对远程 D1 应用迁移。
+      # 注意 Pages 的 wrangler.toml 不支持 [[migrations]]，须用 d1 migrations apply 单独执行。
+      # 应用代码里有 ensureSchema() 自愈建表，因此默认关闭，仅在手动触发并勾选时执行。
+      - name: Apply D1 migrations (optional)
+        if: github.event_name == 'workflow_dispatch' && inputs.run_migrations
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '3.99.0'
+          command: d1 migrations apply ai-cc-prod-db --remote
+
+      # 必须在仓库根目录执行：wrangler 会自动带上根目录的 functions/ 与 wrangler.toml 绑定。
+      # 必须显式 --branch=main：Pages 项目的生产分支是 main，而本仓库分支是 master，
+      # 不指定的话 wrangler 会按当前 git 分支(master)部署成预览版，生产域名不会更新。
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '3.99.0'
+          command: pages deploy client/dist --project-name=ai-cc-prod --branch=main --commit-dirty=true
