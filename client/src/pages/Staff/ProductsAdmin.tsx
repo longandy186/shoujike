@@ -59,6 +59,8 @@ interface FormState {
   bom: string;
   enabled: boolean;
   sort_order: string;
+  safe_zone_mm: string;
+  copies: string;
 }
 
 const emptyForm = (): FormState => ({
@@ -86,6 +88,8 @@ const emptyForm = (): FormState => ({
   bom: '[]',
   enabled: true,
   sort_order: '0',
+  safe_zone_mm: '0',
+  copies: '1',
 });
 
 function toForm(p: AdminProduct): FormState {
@@ -114,6 +118,8 @@ function toForm(p: AdminProduct): FormState {
     bom: JSON.stringify(p.bom ?? []),
     enabled: p.enabled !== false,
     sort_order: String(p.sort_order ?? 0),
+    safe_zone_mm: String(p.safeZoneMm ?? 0),
+    copies: String(p.copies ?? 1),
   };
 }
 
@@ -201,6 +207,8 @@ export default function ProductsAdmin({ onNavigate }: Props) {
       bom: safeParseBom(form.bom),
       enabled: form.enabled,
       sort_order: Number(form.sort_order) || 0,
+      safeZoneMm: Number(form.safe_zone_mm) || 0,
+      copies: Number(form.copies) || 1,
     };
     const res = editing
       ? await updateAdminProduct(editing.masterSku, payload)
@@ -349,6 +357,12 @@ export default function ProductsAdmin({ onNavigate }: Props) {
             </label>
             <label>出血 (mm)
               <input type="number" value={form.bleed} onChange={(e) => setForm({ ...form, bleed: e.target.value })} />
+            </label>
+            <label>安全区 (mm)
+              <input type="number" value={form.safe_zone_mm} onChange={(e) => setForm({ ...form, safe_zone_mm: e.target.value })} placeholder="关键内容/人脸勿超，相框=5" />
+            </label>
+            <label>同图份数 (copies)
+              <input type="number" value={form.copies} onChange={(e) => setForm({ ...form, copies: e.target.value })} placeholder="同图多拼，钥匙扣=2" />
             </label>
             <label>排序
               <input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: e.target.value })} />

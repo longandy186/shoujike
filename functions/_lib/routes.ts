@@ -271,8 +271,8 @@ export function registerRoutes(app: Hono<{ Bindings: Env }>) {
           `INSERT INTO products
            (id, sku, category, name_zh, name_en, name_sr, desc_zh, desc_en, desc_sr,
             image_url, mockup_asset_url, print_area, physical_size, bleed, print_technique,
-            price_rsd, price_eur, stock, bom, enabled, sort_order)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+            price_rsd, price_eur, stock, safe_zone_mm, copies, bom, enabled, sort_order)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
         )
         .bind(
           crypto.randomUUID(),
@@ -293,6 +293,8 @@ export function registerRoutes(app: Hono<{ Bindings: Env }>) {
           Number(b.price_rsd) || 0,
           Number(b.price_eur) || 0,
           Number(b.stock) || 0,
+          Number(b.safeZoneMm ?? b.safe_zone_mm) || 0,
+          Number(b.copies) || 1,
           JSON.stringify(b.bom || []),
           b.enabled === false ? 0 : 1,
           Number(b.sort_order) || 0
@@ -331,6 +333,8 @@ export function registerRoutes(app: Hono<{ Bindings: Env }>) {
         price_rsd: b.price_rsd != null ? Number(b.price_rsd) : undefined,
         price_eur: b.price_eur != null ? Number(b.price_eur) : undefined,
         stock: b.stock != null ? Number(b.stock) : undefined,
+        safe_zone_mm: (b.safeZoneMm ?? b.safe_zone_mm) != null ? Number(b.safeZoneMm ?? b.safe_zone_mm) : undefined,
+        copies: b.copies != null ? Number(b.copies) : undefined,
         bom: b.bom != null ? JSON.stringify(b.bom) : undefined,
         enabled: b.enabled != null ? (b.enabled ? 1 : 0) : undefined,
         sort_order: b.sort_order != null ? Number(b.sort_order) : undefined,

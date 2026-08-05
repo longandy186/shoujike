@@ -37,6 +37,10 @@ export interface SkuProduct {
   priceRsd: number;
   priceEur: number;
   bom: SkuBomItem[];
+  /** 安全区（裁切线内再留白，关键内容/人脸不可超出），单位 mm。相框=5。 */
+  safeZoneMm?: number;
+  /** 每个订单产出的物理印刷份数（同图多拼）。钥匙扣=2（同图双拼）。默认 1。 */
+  copies?: number;
 }
 
 export interface SkuMaterial {
@@ -92,6 +96,8 @@ function rowToProduct(r: Record<string, any>): SkuProduct {
     imageUrl: r.image_url || '',
     mockupAssetUrl: r.mockup_asset_url || '',
     stock: r.stock ?? 0,
+    safeZoneMm: r.safe_zone_mm ?? 0,
+    copies: r.copies ?? 1,
     template: {},
     paper: { type: 'A4', widthMm: 210, heightMm: 297 },
     priceRsd: r.price_rsd ?? 0,
@@ -219,6 +225,8 @@ CREATE TABLE IF NOT EXISTS products (
   price_rsd REAL NOT NULL DEFAULT 0,
   price_eur REAL NOT NULL DEFAULT 0,
   stock INTEGER NOT NULL DEFAULT 0,
+  safe_zone_mm REAL NOT NULL DEFAULT 0,
+  copies INTEGER NOT NULL DEFAULT 1,
   bom TEXT NOT NULL DEFAULT '[]',
   enabled INTEGER NOT NULL DEFAULT 1,
   sort_order INTEGER NOT NULL DEFAULT 0,
@@ -231,6 +239,22 @@ CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
 
 // 进程内只跑一次（wrangler pages dev 单进程复用模块）
 let schemaEnsured = false;
+
+/**
+ * 给既有 products 表补加 safe_zone_mm / copies（拼版规则字段）。
+ * 新建库已由 SCHEMA_DDL 含这两列；本地/生产既有库通过 ALTER 补齐，幂等。
+ * 用 pragma_table_info 判断列是否存在，避免重复 ALTER 报错。
+ */
+async function ensureProductColumns(db: D1Database): Promise<void> {
+  const cols = await db.prepare(`SELECT name FROM pragma_table_info('products')`).all<{ name: string }>();
+  const names = new Set((cols.results || []).map((c) => c.name));
+  if (!names.has('safe_zone_mm')) {
+    await db.prepare('ALTER TABLE products ADD COLUMN safe_zone_mm REAL NOT NULL DEFAULT 0').run();
+  }
+  if (!names.has('copies')) {
+    await db.prepare('ALTER TABLE products ADD COLUMN copies INTEGER NOT NULL DEFAULT 1').run();
+  }
+}
 
 /** 物料种子（与 migrations/0001、0005 一致），表空时灌入 */
 async function seedMaterialsIfEmpty(db: D1Database): Promise<void> {
@@ -268,6 +292,7 @@ export async function ensureSchema(db: D1Database): Promise<void> {
     for (const s of stmts) {
       await db.prepare(s).run();
     }
+    await ensureProductColumns(db);
     await seedMaterialsIfEmpty(db);
     const pr = await db.prepare('SELECT COUNT(*) AS c FROM products').first<{ c: number }>();
     if (!pr || pr.c === 0) await seedFromTemplate(db);
@@ -290,8 +315,8 @@ async function seedFromTemplate(db: D1Database): Promise<void> {
         `INSERT OR IGNORE INTO products
          (id, sku, category, name_zh, name_en, name_sr, desc_zh, desc_en, desc_sr,
           image_url, mockup_asset_url, print_area, physical_size, bleed, print_technique,
-          price_rsd, price_eur, stock, bom, enabled, sort_order)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+          price_rsd, price_eur, stock, safe_zone_mm, copies, bom, enabled, sort_order)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
       )
       .bind(
         crypto.randomUUID(),
@@ -312,6 +337,8 @@ async function seedFromTemplate(db: D1Database): Promise<void> {
         p.priceRsd ?? 0,
         p.priceEur ?? 0,
         p.stock ?? 100,
+        p.safeZoneMm ?? 0,
+        p.copies ?? 1,
         JSON.stringify(p.bom || []),
         p.enabled === false ? 0 : 1,
         p.sortOrder ?? 0

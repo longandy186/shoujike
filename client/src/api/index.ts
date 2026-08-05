@@ -299,6 +299,10 @@ export interface AdminProduct {
   bom?: { materialId: string; qty: number }[];
   enabled?: boolean;
   sort_order?: number;
+  /** 安全区（裁切线内再留白，关键内容/人脸不可超出），单位 mm。相框=5。 */
+  safeZoneMm?: number;
+  /** 每个订单产出的物理印刷份数（同图多拼）。钥匙扣=2。默认 1。 */
+  copies?: number;
 }
 
 export async function getAdminProducts() {

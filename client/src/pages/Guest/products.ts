@@ -43,8 +43,9 @@ export interface Product {
 }
 
 /**
- * 产品特殊规则（安全区 / 同图份数），由 SKU 配置驱动。
- * 此处为前端兜底映射；生产环境应上移至后端 sku.template.json + products 表列。
+ * 产品特殊规则（安全区 / 同图份数）的前端兜底。
+ * 后端 D1 products 表已含 safe_zone_mm / copies 列（店员后台「商品」Tab 可编辑），
+ * /api/skus 会返回；此处仅在后端不可用或字段缺失时兜底。
  * - PHOTO_FRAME_001：安全区 5mm（人脸/关键内容需落在裁切线内 5mm，避免裁掉）
  * - KEYCHAIN_ACRYLIC_001：copies=2（同一张图在一张相纸上拼印 2 份，示范文档「钥匙扣双拼」）
  */
@@ -91,6 +92,9 @@ export async function fetchProducts(force = false): Promise<Product[]> {
         bom: Array.isArray(p.bom)
           ? (p.bom as Array<Record<string, unknown>>).map((b) => ({ materialId: String(b.materialId ?? ''), qty: Number(b.qty ?? 0) }))
           : undefined,
+        // 拼版规则：优先取后端 D1 返回（已下沉），PRODUCT_RULES 在前端 getProductById 处兜底
+        safeZone: Number(p.safeZoneMm ?? 0),
+        copies: Number(p.copies ?? 1),
       }));
       // 后端可能返回全部（含禁用），这里只取启用；若后端已过滤则全部保留
       const enabled = mapped.filter((p) => p.enabled);
