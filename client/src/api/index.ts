@@ -95,6 +95,21 @@ export async function createOrder(params: {
   });
 }
 
+/** 游客多商品下单（V2）：items[] + 合计（优惠后） */
+export async function createVisitorOrder(params: {
+  items: { masterSku: string; imageUrl: string; previewUrl?: string }[];
+  customerName?: string;
+  customerPhone?: string;
+  language?: string;
+  totalRsd?: number;
+  totalEur?: number;
+}) {
+  return request('/orders', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
 /** 获取订单详情 */
 export async function getOrder(orderId: string) {
   return request(`/orders/${orderId}`);
@@ -120,6 +135,42 @@ export async function updateOrderStatus(orderId: string, status: string) {
     body: JSON.stringify({ status }),
   });
 }
+
+/** 驳回订单（店员选预置原因） */
+export async function rejectOrder(orderId: string, reason: string) {
+  return request(`/orders/${orderId}/reject`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+/** 凭取件码查询订单 */
+export async function getOrderByCode(code: string) {
+  return request(`/orders/code/${code}`);
+}
+
+/** Web Push 订阅 */
+export async function subscribePush(sub: { endpoint: string; keys: { p256dh: string; auth: string } }) {
+  return request('/push/subscribe', {
+    method: 'POST',
+    body: JSON.stringify(sub),
+  });
+}
+
+/** 获取 VAPID 公钥 */
+export async function getVapidPublicKey() {
+  return request('/vapid-public-key');
+}
+
+/** 预置驳回原因（店员下拉，非手填） */
+export const REJECT_REASONS = [
+  '照片模糊',
+  '亮度不足或曝光',
+  '比例或尺寸不符',
+  '非人像或内容不符',
+  '背景杂乱',
+  '其他',
+] as const;
 
 /** 库存总览（物料 + 可生产数量 + 预警） */
 export async function getInventorySummary() {
@@ -217,10 +268,93 @@ function canvasToJpeg(c: HTMLCanvasElement, q: number): Promise<Blob> {
   });
 }
 
+/** 店员后台商品管理（数据驱动 CRUD，携带 x-admin-key） */
+const ADMIN_KEY = (import.meta.env.VITE_ADMIN_API_KEY as string | undefined) || '';
+
+async function adminRequest<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
+  return request<T>(endpoint, {
+    headers: { 'Content-Type': 'application/json', 'x-admin-key': ADMIN_KEY },
+    ...options,
+  });
+}
+
+export interface AdminProduct {
+  masterSku: string;
+  name_zh?: string;
+  name_en?: string;
+  name_sr?: string;
+  desc_zh?: string;
+  desc_en?: string;
+  desc_sr?: string;
+  category?: string;
+  image_url?: string;
+  mockup_asset_url?: string;
+  print_area?: { x: number; y: number; width: number; height: number; unit: string };
+  physical_size?: { width: number; height: number; unit: string };
+  bleed?: number;
+  print_technique?: string;
+  price_rsd?: number;
+  price_eur?: number;
+  stock?: number;
+  bom?: { materialId: string; qty: number }[];
+  enabled?: boolean;
+  sort_order?: number;
+}
+
+export async function getAdminProducts() {
+  return adminRequest<AdminProduct[]>('/admin/products');
+}
+export async function createAdminProduct(payload: AdminProduct) {
+  return adminRequest('/admin/products', { method: 'POST', body: JSON.stringify(payload) });
+}
+export async function updateAdminProduct(sku: string, payload: Partial<AdminProduct>) {
+  return adminRequest(`/admin/products/${encodeURIComponent(sku)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+export async function deleteAdminProduct(sku: string) {
+  return adminRequest(`/admin/products/${encodeURIComponent(sku)}`, { method: 'DELETE' });
+}
+export async function adminStockIn(sku: string, qty: number, note?: string) {
+  return adminRequest(`/admin/products/${encodeURIComponent(sku)}/stock-in`, {
+    method: 'POST',
+    body: JSON.stringify({ qty, note }),
+  });
+}
+/** 商品图片上传到 R2，返回可访问 URL */
+export async function adminUploadProductImage(file: File): Promise<ApiResponse<{ url: string }>> {
+  const blob = await compressToJpeg(file, 1600, 2 * 1024 * 1024);
+  const formData = new FormData();
+  formData.append('image', blob, 'product.jpg');
+  try {
+    const res = await fetch(`${API_BASE}/admin/products/image`, {
+      method: 'POST',
+      headers: { 'x-admin-key': ADMIN_KEY },
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) return { ok: false, error: data.message || '上传失败' };
+    return { ok: true, data: data.data };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : '网络连接失败' };
+  }
+}
+
 export default {
   healthCheck,
   ping,
   uploadImage,
   createOrder,
   getOrder,
+  rejectOrder,
+  getOrderByCode,
+  subscribePush,
+  getVapidPublicKey,
+  getAdminProducts,
+  createAdminProduct,
+  updateAdminProduct,
+  deleteAdminProduct,
+  adminStockIn,
+  adminUploadProductImage,
 };

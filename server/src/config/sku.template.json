@@ -1,70 +1,130 @@
 {
-  "version": "1.5.0",
-  "description": "Master SKU 主数据配置（Phase 1.5）。加新品 = 加一条 product，不改代码。",
+  "version": "2.0.0",
+  "description": "Master SKU 主数据（V2：游客多产品 + 三语 + RSD/EUR 双币 + 印刷工艺）。加新品 = 加一条 product，不改代码。",
   "products": [
     {
+      "masterSku": "PHOTO_FRAME_001",
+      "name": "纪念相框",
+      "nameEn": "Photo Frame",
+      "nameSr": "Ram za sliku",
+      "description": "精致相框，留住美好瞬间",
+      "descriptionEn": "Elegant frame to keep your precious moments",
+      "descriptionSr": "Elegantan ram za vaše dragocene trenutke",
+      "icon": "🖼️",
+      "enabled": true,
+      "category": "frame",
+      "physicalSize": { "width": 120, "height": 170, "unit": "mm" },
+      "printArea": { "x": 9.5, "y": 9, "width": 101, "height": 152, "unit": "mm" },
+      "printSettings": { "dpi": 300, "bleed": 3, "mirror": false },
+      "printTechnique": "direct_insert",
+      "template": {},
+      "paper": { "type": "A4", "widthMm": 210, "heightMm": 297 },
+      "priceRsd": 990,
+      "priceEur": 8.4,
+      "bom": [
+        { "materialId": "FRAME_001", "qty": 1 }
+      ]
+    },
+    {
       "masterSku": "KEYCHAIN_ACRYLIC_001",
-      "name": "亚克力宠物钥匙扣",
+      "name": "亚克力钥匙扣",
+      "nameEn": "Acrylic Keychain",
+      "nameSr": "Akrilni privesak",
       "description": "把你的照片做成精美亚克力钥匙扣",
+      "descriptionEn": "Turn your photo into a beautiful acrylic keychain",
+      "descriptionSr": "Pretvorite svoju fotografiju u lep akrilni privesak",
       "icon": "🔑",
       "enabled": true,
-      "category": "钥匙扣",
+      "category": "keychain",
       "physicalSize": { "width": 29, "height": 48, "unit": "mm" },
-      "printArea": { "x": 2, "y": 2, "width": 25, "height": 44, "unit": "mm" },
-      "printSettings": { "dpi": 300, "bleed": 1.5, "mirror": false },
-      "template": {
-        "mask": "/templates/keychain_acrylic/mask.png",
-        "overlay": "/templates/keychain_acrylic/overlay.png"
-      },
+      "printArea": { "x": 0.5, "y": 0.5, "width": 28, "height": 47, "unit": "mm" },
+      "printSettings": { "dpi": 300, "bleed": 2, "mirror": false },
+      "printTechnique": "direct_insert",
+      "template": {},
       "paper": { "type": "A4", "widthMm": 210, "heightMm": 297 },
+      "priceRsd": 590,
+      "priceEur": 5.0,
       "bom": [
         { "materialId": "ACRYLIC_3MM", "qty": 1 },
         { "materialId": "KEY_RING", "qty": 1 }
       ]
     },
     {
-      "masterSku": "PHOTO_FRAME_001",
-      "name": "纪念相框",
-      "description": "精致相框，留住美好瞬间",
-      "icon": "🖼️",
-      "enabled": false,
-      "category": "相框",
-      "physicalSize": { "width": 100, "height": 150, "unit": "mm" },
-      "printArea": { "x": 10, "y": 10, "width": 80, "height": 120, "unit": "mm" },
-      "printSettings": { "dpi": 300, "bleed": 3, "mirror": false },
-      "template": {
-        "mask": "/templates/photo_frame/mask.png",
-        "overlay": "/templates/photo_frame/overlay.png"
-      },
+      "masterSku": "PHONE_CASE_001",
+      "name": "定制手机壳",
+      "nameEn": "Custom Phone Case",
+      "nameSr": "Masna za telefon",
+      "description": "热升华工艺，照片全幅覆盖手机壳",
+      "descriptionEn": "Sublimation print, full-bleed photo on your phone case",
+      "descriptionSr": "Sublimacija, fotografija preko cele masne za telefon",
+      "icon": "📱",
+      "enabled": true,
+      "category": "phonecase",
+      "physicalSize": { "width": 75, "height": 150, "unit": "mm" },
+      "printArea": { "x": 2.5, "y": 2.5, "width": 70, "height": 145, "unit": "mm" },
+      "printSettings": { "dpi": 300, "bleed": 2, "mirror": false },
+      "printTechnique": "heat_sublimation",
+      "template": {},
       "paper": { "type": "A4", "widthMm": 210, "heightMm": 297 },
+      "priceRsd": 1290,
+      "priceEur": 11.0,
       "bom": [
-        { "materialId": "FRAME_001", "qty": 1 }
+        { "materialId": "PHONE_CASE_BLANK", "qty": 1 }
       ]
     },
     {
-      "masterSku": "MAGNET_001",
-      "name": "冰箱贴",
-      "description": "定制冰箱贴，装饰你的生活",
+      "masterSku": "FRIDGE_MAGNET_001",
+      "name": "定制冰箱贴",
+      "nameEn": "Fridge Magnet",
+      "nameSr": "Magnet za frižider",
+      "description": "装饰你的生活，照片冰箱贴",
+      "descriptionEn": "Decorate your life with a photo fridge magnet",
+      "descriptionSr": "Ukrasite svoj život magnetom sa fotografijom",
       "icon": "🧲",
-      "enabled": false,
-      "category": "磁贴",
-      "physicalSize": { "width": 60, "height": 60, "unit": "mm" },
-      "printArea": { "x": 3, "y": 3, "width": 54, "height": 54, "unit": "mm" },
+      "enabled": true,
+      "category": "magnet",
+      "physicalSize": { "width": 70, "height": 100, "unit": "mm" },
+      "printArea": { "x": 2.5, "y": 2.5, "width": 65, "height": 95, "unit": "mm" },
       "printSettings": { "dpi": 300, "bleed": 2, "mirror": false },
-      "template": {
-        "mask": "/templates/magnet/mask.png",
-        "overlay": "/templates/magnet/overlay.png"
-      },
+      "printTechnique": "heat_sublimation",
+      "template": {},
       "paper": { "type": "A4", "widthMm": 210, "heightMm": 297 },
+      "priceRsd": 490,
+      "priceEur": 4.2,
       "bom": [
         { "materialId": "MAGNET_001", "qty": 1 }
+      ]
+    },
+    {
+      "masterSku": "CANVAS_BAG_001",
+      "name": "定制帆布袋",
+      "nameEn": "Canvas Tote Bag",
+      "nameSr": "Platnena torba",
+      "description": "环保帆布袋，单面热升华印照片",
+      "descriptionEn": "Eco canvas tote with single-side sublimation print",
+      "descriptionSr": "Ekološka platnena torba sa štampom sa jedne strane",
+      "icon": "👜",
+      "enabled": true,
+      "category": "canvasbag",
+      "physicalSize": { "width": 200, "height": 250, "unit": "mm" },
+      "printArea": { "x": 10, "y": 10, "width": 180, "height": 230, "unit": "mm" },
+      "printSettings": { "dpi": 300, "bleed": 3, "mirror": false },
+      "printTechnique": "heat_sublimation",
+      "template": {},
+      "paper": { "type": "A4", "widthMm": 210, "heightMm": 297 },
+      "priceRsd": 1490,
+      "priceEur": 12.7,
+      "bom": [
+        { "materialId": "CANVAS_BAG_BLANK", "qty": 1 }
       ]
     }
   ],
   "materials": [
-    { "materialId": "ACRYLIC_3MM", "name": "3mm 亚克力片", "category": "亚克力", "unit": "pcs", "safetyStock": 20 },
-    { "materialId": "KEY_RING",    "name": "钥匙圈",       "category": "五金",   "unit": "pcs", "safetyStock": 20 },
-    { "materialId": "FRAME_001",   "name": "相框基座",     "category": "相框",   "unit": "pcs", "safetyStock": 20 },
-    { "materialId": "MAGNET_001",  "name": "磁贴背板",     "category": "磁贴",   "unit": "pcs", "safetyStock": 20 }
+    { "materialId": "ACRYLIC_3MM", "name": "3mm 亚克力片", "nameEn": "3mm Acrylic", "nameSr": "Akril 3mm", "category": "亚克力", "unit": "pcs", "safetyStock": 20 },
+    { "materialId": "KEY_RING",    "name": "钥匙圈",       "nameEn": "Key ring",  "nameSr": "Privesak", "category": "五金",   "unit": "pcs", "safetyStock": 20 },
+    { "materialId": "FRAME_001",   "name": "相框基座",     "nameEn": "Frame base", "nameSr": "Baza rama", "category": "相框",   "unit": "pcs", "safetyStock": 20 },
+    { "materialId": "MAGNET_001",  "name": "磁贴背板",     "nameEn": "Magnet plate", "nameSr": "Magnet ploča", "category": "磁贴",   "unit": "pcs", "safetyStock": 20 },
+    { "materialId": "PHONE_CASE_BLANK", "name": "手机壳空白坯", "nameEn": "Phone case blank", "nameSr": "Prazna masna", "category": "手机壳", "unit": "pcs", "safetyStock": 20 },
+    { "materialId": "CANVAS_BAG_BLANK", "name": "帆布袋空白坯", "nameEn": "Canvas bag blank", "nameSr": "Prazna platnena torba", "category": "帆布袋", "unit": "pcs", "safetyStock": 20 }
   ]
 }

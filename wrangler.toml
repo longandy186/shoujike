@@ -17,3 +17,7 @@ migrations_dir = "migrations"
 [[r2_buckets]]
 binding = "BUCKET"
 bucket_name = "ai-cc-prod-images-5f5df686"
+
+# 注：店员端 WebSocket 站内实时响铃（第二层）运行在独立 Worker ai-cc-prod-notifier。
+# Pages 函数通过普通 HTTP 调用该 Worker 的 /broadcast（Cloudflare 内网），无需跨脚本 DO 绑定。
+# Worker 地址硬编码于 functions/_lib/notify.ts（NOTIFIER_WORKER_URL，可用 Pages 环境变量覆盖）。

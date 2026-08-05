@@ -39,7 +39,8 @@ const PAPERS: Paper[] = [
   { label: '5寸 (89×127)', w: 89, h: 127 },
 ];
 
-const PRINTABLE = ['READY_PRINT', 'PRINTED', 'PROCESSING', 'COMPLETED'];
+// 拼版候选：任意已上传图片的订单（含新单/待审核/已驳回等），保证页面始终有内容可选
+const HAS_IMAGE = (o: Order) => !!o.image_url || !!o.print_url;
 
 interface Props {
   onNavigate: (tab: 'orders' | 'inventory' | 'imposition') => void;
@@ -57,6 +58,9 @@ interface Tile {
   w: number; // 物理宽 mm
   h: number; // 物理高 mm
   bleed: number; // mm
+  safeZone: number; // mm，安全区（裁切线内再留白）
+  /** 同一订单展开的第几份（钥匙扣同图双拼时 0/1），用于取件码后缀 */
+  copy: number;
 }
 
 interface Placed {
@@ -186,7 +190,7 @@ export default function PrintImposition({ onNavigate }: Props) {
     const res = await getOrders();
     if (res.ok) {
       const all = res.data as Order[];
-      setOrders(all.filter((o) => PRINTABLE.includes(o.status)));
+      setOrders(all.filter((o) => HAS_IMAGE(o)));
     }
     setLoading(false);
   }, []);
@@ -247,31 +251,37 @@ export default function PrintImposition({ onNavigate }: Props) {
     const labelH = Math.max(12, Math.round(pxPerMm));
 
     const chosen = orders.filter((o) => selected.has(o.order_id));
-    const tiles: Tile[] = chosen.map((o) => {
-      const prod = getProductById(o.master_sku);
-      const pw = prod?.physicalSize?.width ?? 50;
-      const ph = prod?.physicalSize?.height ?? 50;
-      const bleed = prod?.bleed ?? 0;
-      return { order: o, img: null, w: pw, h: ph, bleed };
-    });
 
-    // 预加载图片
-    const loaded: Tile[] = await Promise.all(
-      tiles.map(
-        (t) =>
-          new Promise<Tile>((resolve) => {
-            if (!t.order.print_url && !t.order.image_url) return resolve(t);
+    // 预加载图片（按订单去重，避免同图多份重复下载）
+    const orderTiles: Array<Omit<Tile, 'copy'>> = await Promise.all(
+      chosen.map(
+        (o) =>
+          new Promise<Omit<Tile, 'copy'>>((resolve) => {
+            const prod = getProductById(o.master_sku);
+            const pw = prod?.physicalSize?.width ?? 50;
+            const ph = prod?.physicalSize?.height ?? 50;
+            const bleed = prod?.bleed ?? 0;
+            const safeZone = prod?.safeZone ?? 0;
+            const base: Omit<Tile, 'copy'> = { order: o, img: null, w: pw, h: ph, bleed, safeZone };
+            if (!o.print_url && !o.image_url) return resolve(base);
             const im = new Image();
             im.crossOrigin = 'anonymous';
-            im.onload = () => resolve({ ...t, img: im });
-            im.onerror = () => resolve(t);
-            im.src = t.order.print_url || t.order.image_url;
+            im.onload = () => resolve({ ...base, img: im });
+            im.onerror = () => resolve(base);
+            im.src = o.print_url || o.image_url;
           })
       )
     );
 
+    // 展开 copies（钥匙扣同图双拼 = 2 份相同印刷图）
+    const tiles: Tile[] = [];
+    for (const ot of orderTiles) {
+      const copies = Math.max(1, getProductById(ot.order.master_sku)?.copies ?? 1);
+      for (let i = 0; i < copies; i++) tiles.push({ ...ot, copy: i });
+    }
+
     // 计算每个 tile 含出血的像素盒尺寸，并排版
-    const boxes = loaded.map((t) => ({
+    const boxes = tiles.map((t) => ({
       w: (t.w + 2 * t.bleed) * pxPerMm,
       h: (t.h + 2 * t.bleed) * pxPerMm,
       tile: t,
@@ -326,6 +336,22 @@ export default function PrintImposition({ onNavigate }: Props) {
         c.lineWidth = Math.max(1, pxPerMm * 0.15);
         c.strokeRect(cx, cy, cw, ch);
 
+        // 安全区虚线（裁切线内再留白，关键内容/人脸不可超出）——相框=5mm 等
+        if (it.tile.safeZone > 0) {
+          const sz = it.tile.safeZone * pxPerMm;
+          const sx = cx + sz;
+          const sy = cy + sz;
+          const sw = cw - 2 * sz;
+          const sh = ch - 2 * sz;
+          if (sw > 2 && sh > 2) {
+            c.strokeStyle = '#e63946';
+            c.lineWidth = Math.max(1, pxPerMm * 0.12);
+            c.setLineDash([4, 3]);
+            c.strokeRect(sx, sy, sw, sh);
+            c.setLineDash([]);
+          }
+        }
+
         // 取件码标签
         c.fillStyle = '#000000';
         c.font = `${Math.round(labelH * 0.7)}px sans-serif`;
@@ -337,7 +363,7 @@ export default function PrintImposition({ onNavigate }: Props) {
     });
 
     setPages(pagesData);
-    setPlaced(chosen.length);
+    setPlaced(tiles.length);
     setGenerating(false);
   }, [orders, selected, paperIdx, dpi, margin, gap, allowRotate]);
 
@@ -398,7 +424,7 @@ export default function PrintImposition({ onNavigate }: Props) {
 
       {/* 订单选择 */}
       <section className="imp-section">
-        <h2 className="inv-title">选择订单（{selected.size} 已选 / {orders.length} 可打印）</h2>
+        <h2 className="inv-title">选择订单（{selected.size} 已选 / {orders.length} 有图）</h2>
         {loading ? (
           <div className="list-empty">加载中...</div>
         ) : orders.length === 0 ? (
@@ -444,10 +470,16 @@ export default function PrintImposition({ onNavigate }: Props) {
       </section>
       {placed > 0 && (
         <div className="imp-result ok">
-          ✅ 已排版 {placed} 张，共 {pages.length} 页（{PAPERS[paperIdx].label}）
+          ✅ 已排版 {placed} 张（含同图多拼），共 {pages.length} 页（{PAPERS[paperIdx].label}）
           {allowRotate && ' · 已启用旋转省纸'}
         </div>
       )}
+
+      <div className="imp-legend">
+        <span><i className="lg-cut" /> 黑色实线 = 裁切线（物理尺寸）</span>
+        <span><i className="lg-bleed" /> 灰色虚线 = 出血线</span>
+        <span><i className="lg-safe" /> 红色虚线 = 安全区（关键内容/人脸勿超）</span>
+      </div>
 
       {/* 拼版预览（打印时仅显示这些页） */}
       <div className="print-sheet-wrap">

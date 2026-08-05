@@ -29,36 +29,40 @@ export interface Product {
   physicalSize?: { width: number; height: number; unit: string };
   /** 出血值（mm，拼版裁切标记用） */
   bleed?: number;
+  /** 印刷工艺 */
+  printTechnique?: string;
+  /** 价格（RSD / EUR） */
+  priceRsd?: number;
+  priceEur?: number;
   /** BOM 物料清单（缺料核算用） */
   bom?: { materialId: string; qty: number }[];
+  /** 安全区（裁切线内再留白，关键内容不可超出），单位 mm。相框=5。 */
+  safeZone?: number;
+  /** 每个订单产出的物理印刷份数（同图多拼）。钥匙扣=2（同图双拼）。默认 1。 */
+  copies?: number;
 }
+
+/**
+ * 产品特殊规则（安全区 / 同图份数），由 SKU 配置驱动。
+ * 此处为前端兜底映射；生产环境应上移至后端 sku.template.json + products 表列。
+ * - PHOTO_FRAME_001：安全区 5mm（人脸/关键内容需落在裁切线内 5mm，避免裁掉）
+ * - KEYCHAIN_ACRYLIC_001：copies=2（同一张图在一张相纸上拼印 2 份，示范文档「钥匙扣双拼」）
+ */
+const PRODUCT_RULES: Record<string, { safeZone?: number; copies?: number }> = {
+  PHOTO_FRAME_001: { safeZone: 5 },
+  KEYCHAIN_ACRYLIC_001: { copies: 2 },
+};
 
 /**
  * 静态兜底（与 sku.template.json 的启用产品保持一致）。
  * 仅在后端 /api/skus 不可用时使用。
  */
 const FALLBACK_PRODUCTS: Product[] = [
-  {
-    id: 'KEYCHAIN_ACRYLIC_001',
-    name: '亚克力宠物钥匙扣',
-    description: '把你的照片做成精美亚克力钥匙扣',
-    icon: '🔑',
-    enabled: true,
-  },
-  {
-    id: 'PHOTO_FRAME_001',
-    name: '纪念相框',
-    description: '精致相框，留住美好瞬间',
-    icon: '🖼️',
-    enabled: false,
-  },
-  {
-    id: 'MAGNET_001',
-    name: '冰箱贴',
-    description: '定制冰箱贴，装饰你的生活',
-    icon: '🧲',
-    enabled: false,
-  },
+  { id: 'PHOTO_FRAME_001', name: '纪念相框', description: '精致相框，留住美好瞬间', icon: '🖼️', enabled: true, priceRsd: 990, priceEur: 8.4, bleed: 3, physicalSize: { width: 120, height: 170, unit: 'mm' }, safeZone: 5 },
+  { id: 'KEYCHAIN_ACRYLIC_001', name: '亚克力钥匙扣', description: '把你的照片做成精美亚克力钥匙扣', icon: '🔑', enabled: true, priceRsd: 590, priceEur: 5.0, bleed: 2, physicalSize: { width: 29, height: 48, unit: 'mm' }, copies: 2 },
+  { id: 'PHONE_CASE_001', name: '定制手机壳', description: '热升华工艺，照片全幅覆盖手机壳', icon: '📱', enabled: true, priceRsd: 1290, priceEur: 11.0, bleed: 2, physicalSize: { width: 75, height: 150, unit: 'mm' } },
+  { id: 'FRIDGE_MAGNET_001', name: '定制冰箱贴', description: '装饰你的生活，照片冰箱贴', icon: '🧲', enabled: true, priceRsd: 490, priceEur: 4.2, bleed: 2, physicalSize: { width: 70, height: 100, unit: 'mm' } },
+  { id: 'CANVAS_BAG_001', name: '定制帆布袋', description: '环保帆布袋，单面热升华印照片', icon: '👜', enabled: true, priceRsd: 1490, priceEur: 12.7, bleed: 3, physicalSize: { width: 200, height: 250, unit: 'mm' } },
 ];
 
 /** 缓存（避免重复请求，页面切换时复用） */
@@ -80,6 +84,9 @@ export async function fetchProducts(force = false): Promise<Product[]> {
         icon: String(p.icon ?? '📦'),
         enabled: Boolean(p.enabled ?? true),
         physicalSize: p.physicalSize as { width: number; height: number; unit: string } | undefined,
+        printTechnique: String(p.printTechnique ?? 'direct_insert'),
+        priceRsd: Number(p.priceRsd ?? 0),
+        priceEur: Number(p.priceEur ?? 0),
         bleed: typeof p.printSettings === 'object' && p.printSettings ? Number((p.printSettings as Record<string, unknown>).bleed) || 0 : 0,
         bom: Array.isArray(p.bom)
           ? (p.bom as Array<Record<string, unknown>>).map((b) => ({ materialId: String(b.materialId ?? ''), qty: Number(b.qty ?? 0) }))
@@ -102,7 +109,15 @@ export function getEnabledProducts(): Product[] {
   return cache ?? FALLBACK_PRODUCTS;
 }
 
-/** 同步按 ID 查找（基于当前缓存/兜底） */
+/** 同步按 ID 查找（基于当前缓存/兜底），并合并 PRODUCT_RULES（安全区/份数） */
 export function getProductById(id: string): Product | undefined {
-  return getEnabledProducts().find((p) => p.id === id);
+  const base = getEnabledProducts().find((p) => p.id === id);
+  if (!base) return undefined;
+  const rule = PRODUCT_RULES[id];
+  if (!rule) return base;
+  return {
+    ...base,
+    safeZone: base.safeZone ?? rule.safeZone,
+    copies: base.copies ?? rule.copies,
+  };
 }

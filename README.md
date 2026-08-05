@@ -115,6 +115,7 @@ cd client && npm run dev
 | `print_url` | TEXT | 打印文件路径 |
 | `crop_data` | TEXT | Canvas 裁剪参数 (JSON) |
 | `status` | TEXT | 订单状态 |
+| `feedback_reason` | TEXT | 驳回原因（REJECTED 状态有效，来自预置原因下拉） |
 | `remark` | TEXT | 备注 |
 | `created_at` | TEXT | 创建时间 |
 | `updated_at` | TEXT | 更新时间 |
@@ -156,7 +157,10 @@ cd client && npm run dev
 
 ```
 NEW → WAITING_CHECK → READY_PRINT → PRINTED → PROCESSING → COMPLETED
+                                                  ↘ REJECTED（驳回，附 feedback_reason，客人可凭码查看并重传）
 ```
+
+> `REJECTED` 为终态分支：店员在「订单」列表点「驳回」从预置原因下拉选择（非手填），写入 `feedback_reason`；客人端「凭取件码查状态」页会显示驳回原因与「重新上传」引导。
 
 ## 开发约定
 
@@ -200,7 +204,10 @@ NEW → WAITING_CHECK → READY_PRINT → PRINTED → PROCESSING → COMPLETED
   - [x] **缺料拦截**：生成拼版前按所选订单 BOM 核算总需求，库存不足则拦截并列出缺料清单（提示先去库存页补货）
   - [x] **首页红点**：店员「库存」Tab 在存在低库存预警时显示数量徽标（来自 `GET /api/inventory/alerts`）
   - [x] 拼版导出 PDF 用纯前端 `jsPDF`（替代 Phase 3 计划的 PDFKit，无原生依赖）；Sharp 300DPI 出图仍属 Phase 3 未做
-- [x] 部署（阶段 1 本地生产运行 + 阶段 3 Cloudflare 架构说明）
+- [x] 部署（阶段 1 本地生产运行 + 阶段 3 Cloudflare 双轨已上线 `https://ai-cc-prod.pages.dev`）
+- [x] 任务 A — 反馈 / 驳回闭环（REJECTED + feedback_reason + 预置原因下拉 + 客人凭码查状态/重传引导）
+- [x] 任务 B — 单图系统打印按钮 + 拼版页「有图即可」候选修复
+- [x] 任务 C — 来单响铃三层（Web Push PWA 第一 / Telegram 兜底）+ 外部电商 Webhook 零轮询接单（Shopify/Etsy/TikTok 签名校验）
 
 ### Phase 1.5 说明（Master SKU 与 BOM）
 - **产品主数据**：所有产品定义集中在 `server/src/config/sku.template.json`，加新品 = 加一条 product，不改代码；`bom` 数组声明所需物料及数量。
@@ -214,11 +221,36 @@ NEW → WAITING_CHECK → READY_PRINT → PRINTED → PROCESSING → COMPLETED
 - **单张打印图**：店员在编辑页用 `ImageEditor`（Konva.js 渲染）调整好裁剪后，点击「生成打印图」→ 通过 `forwardRef` 暴露的 `exportPrintImage(scale=3)`，用 Konva Stage 高分辨率导出（约 1080px）PNG dataURL → `POST /api/orders/:orderId/print` 上传，后端存入 `uploads/` 并写入订单 `print_url`。生成后可点击「查看打印图」在新标签打开人工打印。
 - **批量拼版打印**：店员切到「拼版」Tab → 勾选多个可打印订单 → 设置纸张/DPI/边距/间距（可选「允许旋转」省纸）→「生成拼版」按各自 SKU 物理尺寸(+出血)在纸张上自动排版（shelf 装箱 + 可选旋转，裁切实线 + 出血虚线 + 取件码标注）→ 可「打印」（浏览器打印，每页独立成张）或「导出 PDF」（jsPDF 多页 PDF）。订单超出单页时自动分页。生成前会核算 BOM 物料需求，库存不足则拦截并提示缺料。设计取舍：拼版渲染用前端原生 Canvas，PDF 导出用纯前端 `jsPDF`，均无需原生模块（避开 Windows 无 VS 编译 + 沙箱安全钩子的限制）。
 
+## A / B / C 任务（反馈闭环 / 单图打印 / 来单响铃 + 电商 Webhook）
+
+### A — 反馈 / 驳回闭环（任务 A）
+- `orders` 表新增 `feedback_reason` 字段（`migrations/0003_reject.sql` 已在远端 D1 应用）。
+- 店员后台「订单」列表：选中订单 → 点击「驳回」→ 从**预置原因下拉**选择（非手填）→ 确认后订单置 `REJECTED` 并写入原因（`PATCH /api/orders/:id/reject`）。
+- 客人端新增「凭取件码查状态」页：输入取件码即可查看当前状态；`REJECTED` 时显示驳回原因 + 「重新上传」引导（`GET /api/orders/code/:code`）。
+- 预置原因常量 `REJECT_REASONS` 定义在前端 `client/src/api/index.ts`，前后端共用。
+
+### B — 单图打印 + 拼版页修复（任务 B）
+- 订单详情「生成打印图」后新增「🖨️ 打印」按钮：弹出系统打印机对话框（iframe 内 `window.print()`），与拼版页打印逻辑一致（`client/src/pages/Staff/StaffPage.tsx` 的 `handlePrint`）。
+- 拼版页修复：原以 `PRINTABLE` 状态过滤导致无 `READY_PRINT+` 订单时页面空白；改为「有图即可」候选（`HAS_IMAGE(o)`：有 `image_url` 或 `print_url` 即纳入），标题相应改为「有图」，彻底解决「看不到拼版页」问题（`client/src/pages/Staff/PrintImposition.tsx`）。
+
+### C — 来单响铃三层 + 外部电商 Webhook（任务 C）
+- **来单通知三层（按稳定性排序，非轮询）**：
+  1. **Web Push（PWA，最稳定）第一层**：`client/public/manifest.webmanifest` + `client/public/sw.js` 注册 Service Worker；店员端打开即请求通知权限并订阅（`client/src/staffRealtime.ts` 的 `initStaffRealtime`）；新订单时 `functions/_lib/webpush.ts` 用 VAPID 密钥（`generateVapidKeys` 生成、存 Pages Secrets）对 payload 做 RFC 8291 aes128gcm 加密 + ES256 VAPID JWT 签名，推送后 Service Worker 显示通知并通过 `postMessage` 唤醒页面弹 Toast + 蜂鸣。
+  2. **WebSocket（Durable Object）站内实时 第二层（已上线）**：独立 Worker `ai-cc-prod-notifier`（`worker/`，部署于 `ai-cc-prod-notifier.longandy2026.workers.dev`）托管 `OrderNotifier` DO（按 id `global` 路由到单一实例）。店员端浏览器 WS 直连 `wss://ai-cc-prod-notifier.longandy2026.workers.dev/websocket`（`client/src/staffRealtime.ts`，断线 3s 自动重连）；来单时 `functions/_lib/notify.ts` 用普通 HTTP POST 该 Worker 的 `/broadcast` → DO 向所有在线 WS 推送 `new_order`，店员端弹 Toast + 蜂鸣（最像"屏幕前来单"体验，仅页面打开时有效）。
+  3. **Telegram（兜底）第三层**：配置 `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` 后，新订单同时推送 Telegram 消息。
+  > 说明：第二层 WebSocket/DO 最初因 API Token 无 Worker 编辑权限暂未上线；用户补全权限后已部署 `ai-cc-prod-notifier` Worker 并打通，三层全部生效。Worker 地址硬编码于 `functions/_lib/notify.ts`（`NOTIFIER_WORKER_URL`，可用 Pages 环境变量覆盖），店员端 WS 地址在 `client/.env` 的 `VITE_NOTIFIER_WS_URL`。
+- **外部电商 Webhook（零轮询接单）**：`POST /api/webhook/:channel`（`functions/_lib/webhook.ts`）统一入口，支持 `shopify` / `etsy` / `tiktok`（**非美团**等国内平台）：
+  - `shopify`：`X-Shopify-Hmac-Sha256` = HMAC-SHA256(rawBody, `SHOPIFY_WEBHOOK_SECRET`)，base64
+  - `etsy`：`X-Etsy-Signature` = HMAC-SHA256(rawBody, `ETSY_WEBHOOK_SECRET`)，base64
+  - `tiktok`：`sign` query 参数 = md5(rawBody + `TIKTOK_APP_SECRET`)
+  - 签名校验通过 → 落 D1（按渠道字段映射创建订单，`source=渠道名`）→ 触发来单通知三层；校验失败返回 401 `INVALID_SIGNATURE`，未知渠道返回 404。
+- **部署相关 Secret（Cloudflare Pages Secrets）**：`VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`（Web Push 加密）、`TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`（兜底通知）、`SHOPIFY_WEBHOOK_SECRET` / `ETSY_WEBHOOK_SECRET` / `TIKTOK_APP_SECRET`（Webhook 校验）。设置：`wrangler pages secret put <NAME>`（值从 stdin 读，无 `--branch` 参数）。
+
 ## MVP 禁止开发内容
 
 - ❌ AI 自动识别裁剪 (YOLO / Vision API)
 - ❌ 静默打印 / 自动打印
-- ❌ 电商平台 API (Shopify / Etsy / TikTok)
+- ❌ 电商平台**双向** API 集成（读订单/改库存等）；**仅保留**外部渠道 Webhook **接单**入口（Shopify / Etsy / TikTok，签名校验、零轮询）
 - ❌ 复杂权限系统
 - ❌ Electron 桌面程序
 

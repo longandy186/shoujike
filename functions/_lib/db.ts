@@ -4,7 +4,7 @@
  * 保持与本地 Express 版本一致的行为（BOM 扣减、库存预警、可生产数量等）。
  */
 import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types';
-import { getProductBySku, getEnabledProducts } from './sku';
+import { getProductBySku, ensureProductsSeeded, getEnabledProducts } from './sku';
 
 export interface MaterialRow {
   material_id: string;
@@ -194,7 +194,7 @@ export async function consumeBom(
 
 /** 各启用产品的可生产数量（按 BOM 取最小瓶颈） */
 export async function getProductCapacities(db: D1Database): Promise<ProductCapacity[]> {
-  const products = getEnabledProducts();
+  const products = await getEnabledProducts(db);
   const result: ProductCapacity[] = [];
   for (const p of products) {
     const bom: BomCapacity[] = [];
@@ -246,11 +246,57 @@ export async function getInventorySummary(db: D1Database): Promise<InventorySumm
   };
 }
 
-/** 创建订单（生成 4 位当日唯一取件码） */
+/** 单个购物车项 */
+export interface OrderItemInput {
+  masterSku: string;
+  imageUrl: string;
+  previewUrl?: string;
+  crop?: unknown;
+}
+
+/** 创建订单（生成 4 位当日唯一取件码）
+ *  支持两种形态：
+ *   - 单品（兼容旧调用）：imageUrl + masterSku
+ *   - 多商品（V2 游客购物车）：items[]，按 SKU 价格算 RSD/EUR 合计，items_json 落库
+ */
 export async function createOrder(
   db: D1Database,
-  p: { imageUrl: string; customerName?: string; masterSku?: string; source?: string; storeId?: string }
+  p: {
+    imageUrl?: string;
+    masterSku?: string;
+    customerName?: string;
+    customerPhone?: string;
+    language?: string;
+    source?: string;
+    storeId?: string;
+    items?: OrderItemInput[];
+    /** 营销优惠后前端传入的最终合计（覆盖按 SKU 求和） */
+    totalRsdOverride?: number;
+    totalEurOverride?: number;
+  }
 ): Promise<{ order?: OrderRow; error?: string }> {
+  const items = p.items && p.items.length > 0 ? p.items : undefined;
+
+  // 确保 products 表已播种（首次下单场景）
+  await ensureProductsSeeded(db);
+
+  // 计算合计（RSD / EUR）
+  let totalRsd = 0;
+  let totalEur = 0;
+  const itemList = items ?? [
+    { masterSku: p.masterSku || '', imageUrl: p.imageUrl || '' },
+  ];
+  for (const it of itemList) {
+    const prod = await getProductBySku(db, it.masterSku);
+    if (prod) {
+      totalRsd += prod.priceRsd || 0;
+      totalEur += prod.priceEur || 0;
+    }
+  }
+  // 优惠覆盖
+  if (typeof p.totalRsdOverride === 'number') totalRsd = p.totalRsdOverride;
+  if (typeof p.totalEurOverride === 'number') totalEur = p.totalEurOverride;
+
   const orderId = crypto.randomUUID();
   let pickupCode = '';
   for (let i = 0; i < 20; i++) {
@@ -266,9 +312,30 @@ export async function createOrder(
   }
   if (!pickupCode) return { error: 'CODE_FAILED' };
 
+  const firstSku = itemList[0]?.masterSku || '';
+  const firstImg = itemList[0]?.imageUrl || '';
+  const itemsJson = JSON.stringify(itemList);
+
   const res = await db
-    .prepare(`INSERT INTO orders (order_id, pickup_code, customer_name, source, store_id, master_sku, image_url, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(orderId, pickupCode, p.customerName || '', p.source || 'offline', p.storeId || '', p.masterSku || '', p.imageUrl, 'NEW')
+    .prepare(
+      `INSERT INTO orders (order_id, pickup_code, customer_name, customer_phone, language, source, store_id, master_sku, image_url, items_json, total_rsd, total_eur, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      orderId,
+      pickupCode,
+      p.customerName || '',
+      p.customerPhone || '',
+      p.language || 'zh',
+      p.source || 'offline',
+      p.storeId || '',
+      firstSku,
+      firstImg,
+      itemsJson,
+      Math.round(totalRsd * 100) / 100,
+      Math.round(totalEur * 100) / 100,
+      'NEW'
+    )
     .run();
 
   const order = await db.prepare('SELECT * FROM orders WHERE id = ?').bind((res.meta as { last_row_id: number }).last_row_id).first<OrderRow>();
@@ -334,6 +401,38 @@ export async function savePrintUrl(
     .run();
   if ((res.meta as { changes: number }).changes === 0) return { error: 'NOT_FOUND' };
   return { order: await getOrderById(db, orderId) };
+}
+
+/** 驳回订单（店员选预置原因，非手填） */
+export async function rejectOrder(
+  db: D1Database,
+  orderId: string,
+  reason: string
+): Promise<{ order?: OrderRow; error?: string }> {
+  const res = await db
+    .prepare(`UPDATE orders SET status = 'REJECTED', feedback_reason = ?, updated_at = datetime('now', 'localtime') WHERE order_id = ?`)
+    .bind(reason, orderId)
+    .run();
+  if ((res.meta as { changes: number }).changes === 0) return { error: 'NOT_FOUND' };
+  return { order: await getOrderById(db, orderId) };
+}
+
+// ==================== Web Push 订阅 ====================
+export interface PushSubscription {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}
+
+export async function savePushSubscription(db: D1Database, sub: PushSubscription): Promise<void> {
+  await db
+    .prepare(`INSERT OR IGNORE INTO push_subscriptions (endpoint, p256dh, auth) VALUES (?, ?, ?)`)
+    .bind(sub.endpoint, sub.p256dh, sub.auth)
+    .run();
+}
+
+export async function getPushSubscriptions(db: D1Database): Promise<PushSubscription[]> {
+  return allRows<PushSubscription>(db.prepare('SELECT endpoint, p256dh, auth FROM push_subscriptions'));
 }
 
 /**

@@ -5,6 +5,7 @@ node_modules/
 dist/
 dist-validate/
 dist-old/
+dist-old-*/
 build/
 
 # Environment files (keep .env.example, ignore actual .env)
@@ -60,3 +61,10 @@ npm-debug.log*
 
 # TypeScript
 *.tsbuildinfo
+
+# Local throwaway verification scripts (not part of the app)
+.apitest.tmp.py
+.create_test.tmp.py
+_admin_cycle*.py
+_demo.py
+_verify*.py

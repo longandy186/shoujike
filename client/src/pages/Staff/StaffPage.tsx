@@ -6,11 +6,12 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import ImageEditor, { type CropData, type ImageEditorHandle } from '../../components/ImageEditor';
-import { getOrder, getOrders, saveCrop, updateOrderStatus, uploadPrint } from '../../api';
-import { getProductById } from '../Guest/products';
+import ImageEditor, { type CropData, type ImageEditorHandle, type PrintProductSpec } from '../../components/ImageEditor';
+import { getOrder, getOrders, saveCrop, updateOrderStatus, uploadPrint, rejectOrder, REJECT_REASONS, request } from '../../api';
+import { initStaffRealtime } from '../../staffRealtime';
 import InventoryView from './InventoryView';
 import PrintImposition from './PrintImposition';
+import ProductsAdmin from './ProductsAdmin';
 import './Staff.css';
 
 interface Order {
@@ -35,6 +36,7 @@ const STATUS_LABEL: Record<string, string> = {
   PRINTED: '已打印',
   PROCESSING: '制作中',
   COMPLETED: '已完成',
+  REJECTED: '已驳回',
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -44,10 +46,11 @@ const STATUS_COLOR: Record<string, string> = {
   PRINTED: '#8b949e',
   PROCESSING: '#bc8cff',
   COMPLETED: '#8b949e',
+  REJECTED: '#f85149',
 };
 
 export default function StaffPage() {
-  const [tab, setTab] = useState<'orders' | 'inventory' | 'imposition'>('orders');
+  const [tab, setTab] = useState<'orders' | 'inventory' | 'imposition' | 'products'>('orders');
   const [view, setView] = useState<View>('list');
 
   // 订单列表
@@ -59,6 +62,11 @@ export default function StaffPage() {
 
   // 低库存预警数量（店员首页红点）
   const [alertCount, setAlertCount] = useState(0);
+
+  // 商品名实时映射（从 /api/skus/all 拉取，后台改价/改名即时反映）
+  const [productNames, setProductNames] = useState<Record<string, string>>({});
+  // 商品打印规格映射（印刷区/内径 + 出血 + DPI），用于生成贴合产品的打印图
+  const [productSpecs, setProductSpecs] = useState<Record<string, PrintProductSpec>>({});
 
   // 取件码查询
   const [lookupCode, setLookupCode] = useState('');
@@ -72,6 +80,12 @@ export default function StaffPage() {
   const [printed, setPrinted] = useState(false);
   const [currentCrop, setCurrentCrop] = useState<CropData | null>(null);
   const editorRef = useRef<ImageEditorHandle>(null);
+
+  // 来单 Toast + 实时响铃
+  const [toast, setToast] = useState<string | null>(null);
+  // 驳回
+  const [showReject, setShowReject] = useState(false);
+  const [rejectReason, setRejectReason] = useState<string>('');
 
   // 加载订单列表
   const loadOrders = useCallback(async () => {
@@ -97,6 +111,45 @@ export default function StaffPage() {
   }, []);
   useEffect(() => { loadAlerts(); }, [loadAlerts]);
 
+  // 拉取商品名 + 打印规格（用于订单列表展示 & 生成贴合产品的打印图）
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await request<Array<{
+          masterSku: string; sku?: string; name_zh?: string; name_en?: string;
+          printArea?: PrintProductSpec['printArea']; physicalSize?: PrintProductSpec['physicalSize'];
+          printSettings?: { dpi?: number; bleed?: number }; bleed?: number; dpi?: number;
+        }>>('/skus/all');
+        if (res.ok && Array.isArray(res.data)) {
+          const names: Record<string, string> = {};
+          const specs: Record<string, PrintProductSpec> = {};
+          for (const p of res.data) {
+            names[p.masterSku] = p.name_zh || p.name_en || p.masterSku;
+            specs[p.masterSku] = {
+              printArea: p.printArea,
+              physicalSize: p.physicalSize,
+              bleed: p.bleed ?? p.printSettings?.bleed ?? 2,
+              dpi: p.dpi ?? p.printSettings?.dpi ?? 300,
+            };
+            if (p.sku) specs[p.sku] = specs[p.masterSku]; // 兼容按 sku 查找
+          }
+          setProductNames(names);
+          setProductSpecs(specs);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, []);
+
+  // 初始化店员端实时（Web Push + WebSocket 站内响铃）
+  useEffect(() => {
+    initStaffRealtime((code) => {
+      setToast(`🔔 新订单 #${code}`);
+      setTimeout(() => setToast(null), 6000);
+    });
+  }, []);
+
   // 按筛选过滤
   const filteredOrders = useMemo(() => {
     if (filter === 'ALL') return orders;
@@ -113,7 +166,23 @@ export default function StaffPage() {
     DONE: orders.filter((o) => ['PRINTED', 'COMPLETED', 'PROCESSING'].includes(o.status)).length,
   }), [orders]);
 
-  const productName = (sku: string) => getProductById(sku)?.name || sku;
+  const productName = (sku: string) => productNames[sku] || sku;
+
+  // 从订单解析所购 SKU（优先 items_json 首个，其次顶层 master_sku）
+  const getOrderSku = (o: Order): string | undefined => {
+    if (o.master_sku) return o.master_sku;
+    try {
+      const items = JSON.parse((o as unknown as { items_json?: string }).items_json || '[]');
+      if (Array.isArray(items) && items[0]?.masterSku) return items[0].masterSku;
+    } catch { /* ignore */ }
+    return undefined;
+  };
+
+  // 当前编辑订单对应的产品打印规格（决定打印图尺寸）
+  const editingProduct = useMemo<PrintProductSpec | undefined>(() => {
+    const sku = editingOrder ? getOrderSku(editingOrder) : undefined;
+    return sku ? productSpecs[sku] : undefined;
+  }, [editingOrder, productSpecs]);
 
   // 取件码查询
   const handleLookup = async () => {
@@ -163,7 +232,7 @@ export default function StaffPage() {
     setPrinting(true);
     setLookupError('');
     try {
-      const dataUrl = editorRef.current.exportPrintImage(3);
+      const dataUrl = editorRef.current.exportPrintImage();
       if (!dataUrl) {
         setLookupError('图片未加载完成，请稍候');
         setPrinting(false);
@@ -194,9 +263,53 @@ export default function StaffPage() {
     }
   };
 
+  // 驳回（店员选预置原因，非手填）
+  const handleReject = async () => {
+    if (!editingOrder || !rejectReason) return;
+    const res = await rejectOrder(editingOrder.order_id, rejectReason);
+    if (res.ok) {
+      setEditingOrder(res.data as Order);
+      setShowReject(false);
+      setRejectReason('');
+      loadOrders();
+    } else {
+      setLookupError(res.error || '驳回失败');
+    }
+  };
+
+  // 单图打印（弹系统打印机，与拼版页一致）
+  const handlePrint = () => {
+    if (!editingOrder?.print_url) return;
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.src = editingOrder.print_url;
+    iframe.onload = () => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch {
+        /* ignore */
+      }
+    };
+    document.body.appendChild(iframe);
+    setTimeout(() => {
+      try {
+        document.body.removeChild(iframe);
+      } catch {
+        /* ignore */
+      }
+    }, 60000);
+  };
+
   // ==================== 非订单标签页 ====================
   if (tab === 'inventory') return <InventoryView onNavigate={setTab} />;
   if (tab === 'imposition') return <PrintImposition onNavigate={setTab} />;
+  if (tab === 'products') return <ProductsAdmin onNavigate={setTab} />;
 
   // ==================== 编辑视图 ====================
   if (view === 'edit' && editingOrder) {
@@ -210,12 +323,14 @@ export default function StaffPage() {
             )}
           </h1>
         </header>
+        {toast && <div className="new-order-toast">{toast}</div>}
 
         <div className="staff-section">
           <ImageEditor
             ref={editorRef}
             imageUrl={editingOrder.image_url}
             width={Math.min(360, window.innerWidth - 32)}
+            product={editingProduct}
             initialCrop={currentCrop}
             onCropChange={setCurrentCrop}
           />
@@ -233,6 +348,30 @@ export default function StaffPage() {
               <button className="btn-print-out" onClick={() => window.open(editingOrder!.print_url, '_blank')}>
                 📄 查看打印图
               </button>
+            )}
+
+            {editingOrder.print_url && (
+              <button className="btn-print-out" onClick={handlePrint}>
+                🖨️ 打印
+              </button>
+            )}
+
+            <button className="btn-reject" onClick={() => { setShowReject((v) => !v); setRejectReason(''); }}>
+              ⛔ 驳回
+            </button>
+            {showReject && (
+              <div className="reject-panel">
+                <select value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}>
+                  <option value="">选择驳回原因…</option>
+                  {REJECT_REASONS.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+                <button className="btn-reject-confirm" disabled={!rejectReason} onClick={handleReject}>
+                  确认驳回
+                </button>
+                <button className="btn-reject-cancel" onClick={() => setShowReject(false)}>取消</button>
+              </div>
             )}
 
             <div className="status-actions">
@@ -274,6 +413,7 @@ export default function StaffPage() {
         <h1>店员后台</h1>
         <p>文创生产管理系统</p>
       </header>
+      {toast && <div className="new-order-toast">{toast}</div>}
 
       <nav className="inv-tabbar inv-tabbar-top">
         <button onClick={() => setTab('orders')} className="active">📋 订单</button>
@@ -281,6 +421,7 @@ export default function StaffPage() {
           📦 库存{alertCount > 0 && <span className="inv-badge">{alertCount}</span>}
         </button>
         <button onClick={() => setTab('imposition')}>🖨️ 拼版</button>
+        <button onClick={() => setTab('products')}>🛒 商品</button>
       </nav>
 
       <div className="staff-section">
