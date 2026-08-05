@@ -241,18 +241,47 @@ CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
 let schemaEnsured = false;
 
 /**
- * 给既有 products 表补加 safe_zone_mm / copies（拼版规则字段）。
- * 新建库已由 SCHEMA_DDL 含这两列；本地/生产既有库通过 ALTER 补齐，幂等。
- * 用 pragma_table_info 判断列是否存在，避免重复 ALTER 报错。
+ * 既有表补列声明表（schema 自愈）。
+ *
+ * 背景：SCHEMA_DDL 用的是 CREATE TABLE IF NOT EXISTS——对**已存在**的表完全不生效。
+ * 因此任何“给已上线的表加字段”都必须在这里登记一条，否则新建库正常、老库（生产）
+ * 会因缺列在运行时报 `table X has no column named Y`。
+ *
+ * 历史事故：orders 的 items_json/total_rsd/total_eur/language/customer_phone 五列
+ * 只加进了 DDL 未登记补列，导致生产库游客多商品下单长期 500。
+ *
+ * 新增字段规则：改 SCHEMA_DDL 的同时，必须在此处补一行同名同类型同默认值。
  */
-async function ensureProductColumns(db: D1Database): Promise<void> {
-  const cols = await db.prepare(`SELECT name FROM pragma_table_info('products')`).all<{ name: string }>();
-  const names = new Set((cols.results || []).map((c) => c.name));
-  if (!names.has('safe_zone_mm')) {
-    await db.prepare('ALTER TABLE products ADD COLUMN safe_zone_mm REAL NOT NULL DEFAULT 0').run();
-  }
-  if (!names.has('copies')) {
-    await db.prepare('ALTER TABLE products ADD COLUMN copies INTEGER NOT NULL DEFAULT 1').run();
+const COLUMN_PATCHES: Record<string, Record<string, string>> = {
+  products: {
+    safe_zone_mm: 'REAL NOT NULL DEFAULT 0',
+    copies: 'INTEGER NOT NULL DEFAULT 1',
+  },
+  orders: {
+    items_json: "TEXT NOT NULL DEFAULT '[]'",
+    total_rsd: 'REAL NOT NULL DEFAULT 0',
+    total_eur: 'REAL NOT NULL DEFAULT 0',
+    language: "TEXT NOT NULL DEFAULT 'zh'",
+    customer_phone: "TEXT NOT NULL DEFAULT ''",
+  },
+};
+
+/**
+ * 对既有表按 COLUMN_PATCHES 逐列补齐，幂等。
+ * 用 pragma_table_info 判断列是否已存在，避免重复 ALTER 报错。
+ */
+async function ensureColumns(db: D1Database): Promise<void> {
+  for (const [table, patches] of Object.entries(COLUMN_PATCHES)) {
+    const cols = await db
+      .prepare('SELECT name FROM pragma_table_info(?1)')
+      .bind(table)
+      .all<{ name: string }>();
+    const existing = new Set((cols.results || []).map((c) => c.name));
+    if (existing.size === 0) continue; // 表不存在（理论上 DDL 已建），跳过
+    for (const [col, def] of Object.entries(patches)) {
+      if (existing.has(col)) continue;
+      await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`).run();
+    }
   }
 }
 
@@ -292,7 +321,7 @@ export async function ensureSchema(db: D1Database): Promise<void> {
     for (const s of stmts) {
       await db.prepare(s).run();
     }
-    await ensureProductColumns(db);
+    await ensureColumns(db);
     await seedMaterialsIfEmpty(db);
     const pr = await db.prepare('SELECT COUNT(*) AS c FROM products').first<{ c: number }>();
     if (!pr || pr.c === 0) await seedFromTemplate(db);

@@ -290,6 +290,17 @@ const ImageEditor = forwardRef<ImageEditorHandle, Props>(function ImageEditor(
     im.src = imageUrl;
   }, [imageUrl, canvasW, canvasH, initialCrop]);
 
+  // 图片就绪后发射一次初始 crop。
+  // 否则 onCropChange 只在拖拽/缩放/AI裁剪时触发：店员打开新订单若不做任何调整，
+  // 父组件 currentCrop 始终为 null，「💾 保存裁剪」会被 `if (!currentCrop) return`
+  // 静默拦截——按钮点了没反应也没报错。
+  useEffect(() => {
+    if (!loaded || !img) return;
+    emitCrop();
+    // 只在图片就绪时发一次；emitCrop 随 offset/scale 变化重建，不列为依赖以免重复发射
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, img]);
+
   // 暴露导出方法（用 Konva Stage 高分辨率导出，clip 保证只输出 canvas 区域）
   useImperativeHandle(
     ref,

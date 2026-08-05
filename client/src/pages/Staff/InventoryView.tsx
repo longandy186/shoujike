@@ -49,7 +49,7 @@ interface Summary {
 }
 
 interface Props {
-  onNavigate: (tab: 'orders' | 'inventory' | 'imposition') => void;
+  onNavigate: (tab: 'orders' | 'inventory' | 'imposition' | 'products') => void;
 }
 
 export default function InventoryView({ onNavigate }: Props) {
@@ -212,6 +212,7 @@ export default function InventoryView({ onNavigate }: Props) {
         <button onClick={() => onNavigate('orders')}>📋 订单</button>
         <button className="active" onClick={() => onNavigate('inventory')}>📦 库存</button>
         <button onClick={() => onNavigate('imposition')}>🖨️ 拼版</button>
+        <button onClick={() => onNavigate('products')}>🛒 商品</button>
       </nav>
     </div>
   );

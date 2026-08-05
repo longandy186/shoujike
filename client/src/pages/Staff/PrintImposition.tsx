@@ -43,7 +43,7 @@ const PAPERS: Paper[] = [
 const HAS_IMAGE = (o: Order) => !!o.image_url || !!o.print_url;
 
 interface Props {
-  onNavigate: (tab: 'orders' | 'inventory' | 'imposition') => void;
+  onNavigate: (tab: 'orders' | 'inventory' | 'imposition' | 'products') => void;
 }
 
 interface Shortage {
@@ -492,6 +492,7 @@ export default function PrintImposition({ onNavigate }: Props) {
         <button onClick={() => onNavigate('orders')}>📋 订单</button>
         <button onClick={() => onNavigate('inventory')}>📦 库存</button>
         <button className="active" onClick={() => onNavigate('imposition')}>🖨️ 拼版</button>
+        <button onClick={() => onNavigate('products')}>🛒 商品</button>
       </nav>
     </div>
   );
